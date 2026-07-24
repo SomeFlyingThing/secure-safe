@@ -29,6 +29,7 @@ const NOUNCE_SIZE: usize = 24;
 const MAX_PATH_SIZE: usize = 16 * 1024;
 const PATH_SIZE_BYTES: usize = size_of::<u32>();
 const COMPRESSION_LEVEL: i32 = 5;
+
 pub struct Raw {
     pub salt: [u8; SALT_SIZE],
     pub nounce: [u8; NOUNCE_SIZE],
