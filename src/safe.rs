@@ -1,22 +1,15 @@
 use std::{
-    ffi::OsString,
     fs::{self, File, OpenOptions},
-    io::{self, Cursor, Read, Seek, SeekFrom, Write},
+    io::{Cursor, Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
 };
 
-use argon2::{
-    Argon2,
-    password_hash::{Salt, SaltString},
-};
-use chacha20poly1305::{ChaChaPoly1305, KeyInit, XChaCha20Poly1305, XNonce, aead::Aead};
+use argon2::{Argon2, password_hash::SaltString};
+use chacha20poly1305::{KeyInit, XChaCha20Poly1305, XNonce, aead::Aead};
 use rand_core::{OsRng, RngCore};
-use zeroize::{Zeroize, Zeroizing};
+use zeroize::Zeroizing;
 
-use crate::{
-    PASSWORD_SIZE,
-    settings::{self, Settings, Store},
-};
+use crate::{PASSWORD_SIZE, settings::Settings};
 
 fn read_file(path: &str) -> Vec<u8> {
     let mut file = File::open(path).expect("couldnt read the file check the path");
@@ -58,30 +51,20 @@ impl Safe<Raw> {
         let salt = SaltString::generate(&mut OsRng);
 
         let mut key = Zeroizing::new([0u8; 34]);
-        Argon2::default()
-            .hash_password_into(password, salt.to_string().as_bytes(), &mut *key)
-            .expect(obfstr::obfstr!("error deriving password"));
+        Argon2::default().hash_password_into(password, salt.to_string().as_bytes(), &mut *key).expect(obfstr::obfstr!("error deriving password"));
 
         let cipher = XChaCha20Poly1305::new_from_slice(&*key).unwrap();
 
         let mut nounce = [0u8; NOUNCE_SIZE];
         OsRng.fill_bytes(&mut nounce);
 
-        let ciphertext = cipher
-            .encrypt(&nounce.into(), contents.as_ref())
-            .map_err(|_| "encryption failed")
-            .unwrap();
+        let ciphertext = cipher.encrypt(&nounce.into(), contents.as_ref()).map_err(|_| "encryption failed").unwrap();
 
         let mut buf = [0u8; 16];
 
         Self {
             state: Raw {
-                salt: salt
-                    .as_salt()
-                    .decode_b64(&mut buf)
-                    .unwrap()
-                    .try_into()
-                    .unwrap(),
+                salt: salt.as_salt().decode_b64(&mut buf).unwrap().try_into().unwrap(),
                 name: name.to_str().unwrap().to_owned(),
                 ciphertext,
                 path: path.as_bytes().try_into().unwrap(),
@@ -128,47 +111,46 @@ pub fn check(settings: &Settings) {
         }
     }
 }
-pub fn move_out(password: &[u8; PASSWORD_SIZE], settins: &Settings, name: &str) {
+pub enum EncError {
+    Decryption(String),
+    UnZip(String),
+    Read,
+}
+
+pub fn move_out(password: &[u8; PASSWORD_SIZE], settins: &Settings, name: &str) -> Result<(), EncError> {
     let mut file = File::open(settins.enc_dir.join(name)).expect("check if the name is correct");
 
     let mut salt = [0u8; 16];
     let mut nounce = [0u8; NOUNCE_SIZE];
     let mut path = [0u8; 54];
     let mut cypehr = Vec::new();
-    file.read_exact(&mut salt).unwrap();
-    file.read_exact(&mut nounce).unwrap();
-    file.read_exact(&mut path).unwrap();
+    file.read_exact(&mut salt).map_err(|_| EncError::Read)?;
+    file.read_exact(&mut nounce).map_err(|_| EncError::Read)?;
+    file.read_exact(&mut path).map_err(|_| EncError::Read)?;
 
-    file.read_to_end(&mut cypehr).unwrap();
+    file.read_to_end(&mut cypehr).map_err(|_| EncError::Read)?;
 
     let mut key = Zeroizing::new([0u8; 32]);
-    Argon2::default()
-        .hash_password_into(password, &salt, &mut *key)
-        .unwrap();
+    Argon2::default().hash_password_into(password, &salt, &mut *key).unwrap();
+
+    let path = String::from_utf8(path.to_vec()).unwrap();
+    
+    // will be used for the file name 
+    let path_to_name = PathBuf::from(path.clone());
 
     let cipher = XChaCha20Poly1305::new_from_slice(&*key).unwrap();
-    let decrypted = cipher
-        .decrypt(&XNonce::from(nounce), cypehr.as_ref())
-        .unwrap();
-    let decomp = zstd::decode_all(Cursor::new(decrypted)).unwrap();
+    let decrypted = cipher.decrypt(&XNonce::from(nounce), cypehr.as_ref()).map_err(|_| EncError::Decryption(path_to_name.file_name().unwrap().to_str().unwrap().to_owned()))?;
+
+    let decomp = zstd::decode_all(Cursor::new(decrypted)).map_err(|error| EncError::UnZip(error.to_string()))?;
     let text = String::from_utf8(decomp).unwrap();
-    let path = String::from_utf8(path.to_vec()).unwrap();
 
     let safe = Safe {
-        state: Cooked {
-            text,
-            name: name.to_owned(),
-            path,
-        },
+        state: Cooked { text, name: name.to_owned(), path },
     };
 
-    let mut file = OpenOptions::new()
-        .create(true)
-        .truncate(true)
-        .write(true)
-        .open(safe.state.path)
-        .unwrap();
+    let mut file = OpenOptions::new().create(true).truncate(true).write(true).open(safe.state.path).unwrap();
 
     file.write_all(safe.state.text.as_bytes().as_ref()).unwrap();
     remove(name, settins);
+    Ok(())
 }

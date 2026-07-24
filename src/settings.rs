@@ -2,7 +2,7 @@ use std::{
     env,
     fs::{self, File},
     io::{ErrorKind, Read},
-    path::{Path, PathBuf},
+    path::PathBuf,
     process::exit,
 };
 

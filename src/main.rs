@@ -1,12 +1,9 @@
-use std::{
-    env::args, io, mem::zeroed, ops::IndexMut, process::exit, thread::sleep, time::Duration,
-};
+use std::{env::args, io, process::exit};
 
-use obfstr::obfcstr;
-use zeroize::{Zeroize, Zeroizing};
+use zeroize::Zeroizing;
 
 use crate::{
-    safe::{Safe, check, move_out, remove},
+    safe::{EncError, Safe, check, move_out, remove},
     settings::Settings,
 };
 
@@ -17,7 +14,7 @@ fn main() {
     let args = parse();
 
     let settings = Settings::load();
-    let password = ask_password();
+    let mut password = ask_password();
 
     match args {
         Flags::Add(name) => {
@@ -39,7 +36,24 @@ fn main() {
             check(&settings);
         },
         Flags::MoveOut(name) => {
-            move_out(&password, &settings, &name);
+            loop {
+                match move_out(&password, &settings, &name) {
+                    Ok(_) => break,
+                    Err(EncError::UnZip(file_name)) => {
+                        eprintln!("error unziping file: {}", file_name);
+                        break;
+                    },
+                    Err(EncError::Decryption(file_name)) => {
+                        eprintln!("error decrypting {}", file_name);
+                        password = ask_password();
+                        // try again with new password
+                    },
+                    Err(EncError::Read) => {
+                        eprintln!("error reading file try again later");
+                        exit(0);
+                    },
+                };
+            }
         },
     }
 }
@@ -64,9 +78,7 @@ fn ask_password() -> Zeroizing<[u8; 32]> {
 
         println!(
             "{}",
-            obfstr::obfstr!(
-                "tip: if this is your first time using this program dont wory about not having a password (we know you dont have one set) just choose one and DONT forget it, it is SUPER important in the future !!!"
-            )
+            obfstr::obfstr!("tip: if this is your first time using this program dont wory about not having a password (we know you dont have one set) just choose one and DONT forget it, it is SUPER important in the future !!!")
         );
 
         if password.len() < PASSWORD_SIZE {
@@ -87,12 +99,12 @@ fn parse() -> Flags {
 
     let arg = args.get(1).unwrap();
 
-    let Some(path) = args.get(2) else {
+    let Some(_path) = args.get(2) else {
         println!("missing path or name in arguments");
         exit(1);
     };
 
-    let password = ask_password();
+    let _password = ask_password();
 
     if arg == "--add" || arg == "add" {
         Flags::Add(args[2].to_string())
