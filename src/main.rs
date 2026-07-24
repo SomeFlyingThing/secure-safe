@@ -1,5 +1,6 @@
 use std::{env::args, io, process::exit};
 
+use owo_colors::OwoColorize;
 use zeroize::Zeroizing;
 
 use crate::{
@@ -14,11 +15,11 @@ fn main() {
     let args = parse();
 
     let settings = Settings::load();
-    let mut password = ask_password();
 
     match args {
         Flags::Add(name) => {
-            let new = Safe::new(&name, &password);
+            let password = ask_password();
+            let new = Safe::new(&name, password.as_bytes());
             new.store(&settings);
         },
         Flags::Remove(name) => {
@@ -33,11 +34,13 @@ fn main() {
             }
         },
         Flags::Check => {
-            check(&settings);
+            let password = ask_password();
+            check(password.as_bytes(), &settings);
         },
         Flags::MoveOut(name) => {
+            let mut password = ask_password();
             loop {
-                match move_out(&password, &settings, &name) {
+                match move_out(password.as_bytes(), &settings, &name) {
                     Ok(_) => break,
                     Err(EncError::UnZip(file_name)) => {
                         eprintln!("error unziping file: {}", file_name);
@@ -65,8 +68,7 @@ enum Flags {
     Check,
 }
 
-const PASSWORD_SIZE: usize = 32;
-fn ask_password() -> Zeroizing<[u8; 32]> {
+fn ask_password() -> Zeroizing<String> {
     loop {
         let password = match rpassword::prompt_password(obfstr::obfstr!("Password: ")) {
             Ok(password) => Zeroizing::new(password),
@@ -81,15 +83,57 @@ fn ask_password() -> Zeroizing<[u8; 32]> {
             obfstr::obfstr!("tip: if this is your first time using this program dont wory about not having a password (we know you dont have one set) just choose one and DONT forget it, it is SUPER important in the future !!!")
         );
 
-        if password.len() < PASSWORD_SIZE {
-            return Zeroizing::new(password.as_bytes().try_into().unwrap());
+        if password.is_empty() {
+            println!("{}", obfstr::obfstr!("choose a password"));
         } else {
-            println!("{}", obfstr::obfstr!("choose a smaller password"));
+            return password;
         }
     }
 }
 
 fn parse() -> Flags {
+    fn help() -> ! {
+        println!(
+            "\
+    {}
+
+    {}
+
+    {}
+
+        secure_safe <COMMAND> [PATH]
+
+    {}
+
+        {:<18} Encrypt and securely store a file
+        {:<18} Permanently remove a stored file
+                          {}
+        {:<18} Decrypt and restore a stored file
+        {:<18} Verify the integrity of the database
+        {:<18} Display this help message
+
+    {}
+
+        secure_safe add secret.txt
+        secure_safe rm secret.txt
+        secure_safe mo secret.txt
+        secure_safe check
+    ",
+            "secure_safe".bold().bright_white(),
+            "Simple Super Safe encrypted file vault.".italic(),
+            "USAGE".bold().cyan(),
+            "COMMANDS".bold().cyan(),
+            "add,   --add <PATH>",
+            "rm,    --rm <NAME>",
+            "WARNING: This action is irreversible.".red().bold(),
+            "mo,    --mo <NAME>",
+            "check, --check",
+            "help,  --help",
+            "EXAMPLES".bold().cyan(),
+        );
+
+        exit(0);
+    }
     let args: Vec<String> = args().collect();
 
     if args.is_empty() {
@@ -97,25 +141,30 @@ fn parse() -> Flags {
         exit(0);
     }
 
-    let arg = args.get(1).unwrap();
+    let arg = args.get(1).unwrap_or_else(|| {
+        println!("no args provided");
+        help();
+    });
 
-    let Some(_path) = args.get(2) else {
-        println!("missing path or name in arguments");
-        exit(1);
-    };
-
-    let _password = ask_password();
-
-    if arg == "--add" || arg == "add" {
-        Flags::Add(args[2].to_string())
-    } else if arg == "--rm" || arg == "rm" {
-        Flags::Remove(args[2].to_string())
+    if arg == "--help" || arg == "help" {
+        help();
     } else if arg == "--check" || arg == "check" {
         Flags::Check
-    } else if arg == "--mo" || arg == "mo" {
-        Flags::MoveOut(args[2].to_string())
     } else {
-        println!("incorrect argument");
-        exit(0);
+        let Some(path) = args.get(2) else {
+            println!("missing path or name in arguments");
+            exit(1);
+        };
+
+        if arg == "--add" || arg == "add" {
+            Flags::Add(path.to_string())
+        } else if arg == "--rm" || arg == "rm" {
+            Flags::Remove(path.to_string())
+        } else if arg == "--mo" || arg == "mo" {
+            Flags::MoveOut(path.to_string())
+        } else {
+            println!("incorrect argument");
+            exit(1);
+        }
     }
 }

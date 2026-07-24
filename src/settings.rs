@@ -49,6 +49,7 @@ impl Settings {
             Ok(file) => file,
             Err(err) if err.kind() == ErrorKind::NotFound => {
                 let settings = Settings::default();
+                fs::create_dir_all(&settings.enc_dir).unwrap();
                 settings.store();
                 return settings;
             },
@@ -65,6 +66,8 @@ impl Settings {
             exit(0);
         }
 
-        toml::from_str(&contents).expect(obfstr::obfstr!("toml file might be wrongly formatted"))
+        let settings = toml::from_str::<Settings>(&contents).expect(obfstr::obfstr!("toml file might be wrongly formatted"));
+        fs::create_dir_all(&settings.enc_dir).unwrap();
+        settings
     }
 }
