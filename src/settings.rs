@@ -63,7 +63,7 @@ impl Settings {
 
         if contents.is_empty() {
             println!("configure settings at {:?}", path);
-            exit(0);
+            exit(crate::EXIT_SUCCESS);
         }
 
         let settings = toml::from_str::<Settings>(&contents).expect(obfstr::obfstr!("toml file might be wrongly formatted"));

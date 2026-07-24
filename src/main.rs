@@ -11,6 +11,12 @@ use crate::{
 mod safe;
 mod settings;
 
+const EXIT_SUCCESS: i32 = 0;
+const EXIT_FAILURE: i32 = 1;
+const COMMAND_INDEX: usize = 1;
+const PATH_INDEX: usize = 2;
+const HELP_COLUMN_WIDTH: usize = 18;
+
 fn main() {
     let args = parse();
 
@@ -53,7 +59,7 @@ fn main() {
                     },
                     Err(EncError::Read) => {
                         eprintln!("error reading file try again later");
-                        exit(0);
+                        exit(EXIT_SUCCESS);
                     },
                 };
             }
@@ -105,12 +111,12 @@ fn parse() -> Flags {
 
     {}
 
-        {:<18} Encrypt and securely store a file
-        {:<18} Permanently remove a stored file
+        {:<HELP_COLUMN_WIDTH$} Encrypt and securely store a file
+        {:<HELP_COLUMN_WIDTH$} Permanently remove a stored file
                           {}
-        {:<18} Decrypt and restore a stored file
-        {:<18} Verify the integrity of the database
-        {:<18} Display this help message
+        {:<HELP_COLUMN_WIDTH$} Decrypt and restore a stored file
+        {:<HELP_COLUMN_WIDTH$} Verify the integrity of the database
+        {:<HELP_COLUMN_WIDTH$} Display this help message
 
     {}
 
@@ -132,16 +138,16 @@ fn parse() -> Flags {
             "EXAMPLES".bold().cyan(),
         );
 
-        exit(0);
+        exit(EXIT_SUCCESS);
     }
     let args: Vec<String> = args().collect();
 
     if args.is_empty() {
         println!("no args where provided");
-        exit(0);
+        exit(EXIT_SUCCESS);
     }
 
-    let arg = args.get(1).unwrap_or_else(|| {
+    let arg = args.get(COMMAND_INDEX).unwrap_or_else(|| {
         println!("no args provided");
         help();
     });
@@ -151,9 +157,9 @@ fn parse() -> Flags {
     } else if arg == "--check" || arg == "check" {
         Flags::Check
     } else {
-        let Some(path) = args.get(2) else {
+        let Some(path) = args.get(PATH_INDEX) else {
             println!("missing path or name in arguments");
-            exit(1);
+            exit(EXIT_FAILURE);
         };
 
         if arg == "--add" || arg == "add" {
@@ -164,7 +170,7 @@ fn parse() -> Flags {
             Flags::MoveOut(path.to_string())
         } else {
             println!("incorrect argument");
-            exit(1);
+            exit(EXIT_FAILURE);
         }
     }
 }

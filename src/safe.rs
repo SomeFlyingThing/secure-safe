@@ -23,10 +23,14 @@ fn read_file(path: &str) -> Vec<u8> {
     bytes
 }
 
+const SALT_SIZE: usize = 16;
+const KEY_SIZE: usize = 32;
 const NOUNCE_SIZE: usize = 24;
 const MAX_PATH_SIZE: usize = 16 * 1024;
+const PATH_SIZE_BYTES: usize = size_of::<u32>();
+const COMPRESSION_LEVEL: i32 = 5;
 pub struct Raw {
-    pub salt: [u8; 16],
+    pub salt: [u8; SALT_SIZE],
     pub nounce: [u8; NOUNCE_SIZE],
     pub ciphertext: Vec<u8>,
     pub name: String,
@@ -41,15 +45,15 @@ impl Safe<Raw> {
     pub fn new(path: &str, password: &[u8]) -> Self {
         //read and compress
         let contents = read_file(path);
-        let contents = zstd::encode_all(Cursor::new(&contents), 5).unwrap();
+        let contents = zstd::encode_all(Cursor::new(&contents), COMPRESSION_LEVEL).unwrap();
 
         let name = PathBuf::from(path);
         let name = name.file_name().expect("not valid file name");
 
         let salt = SaltString::generate(&mut OsRng);
 
-        let mut key = Zeroizing::new([0u8; 32]);
-        let mut salt_bytes = [0u8; 16];
+        let mut key = Zeroizing::new([0u8; KEY_SIZE]);
+        let mut salt_bytes = [0u8; SALT_SIZE];
         salt.as_salt().decode_b64(&mut salt_bytes).unwrap();
         Argon2::default().hash_password_into(password, &salt_bytes, &mut *key).expect(obfstr::obfstr!("error deriving password"));
 
@@ -104,9 +108,9 @@ pub fn check(password: &[u8], settings: &Settings) {
         if path.is_file() {
             let mut file = File::open(&path).unwrap();
 
-            let mut salt = [0u8; 16];
+            let mut salt = [0u8; SALT_SIZE];
             let mut nounce = [0u8; NOUNCE_SIZE];
-            let mut path_size = [0u8; 4];
+            let mut path_size = [0u8; PATH_SIZE_BYTES];
             if file.read_exact(&mut salt).is_err() || file.read_exact(&mut nounce).is_err() || file.read_exact(&mut path_size).is_err() {
                 eprintln!("invalid stored file: {:?}", path);
                 continue;
@@ -125,7 +129,7 @@ pub fn check(password: &[u8], settings: &Settings) {
                 continue;
             }
 
-            let mut key = Zeroizing::new([0u8; 32]);
+            let mut key = Zeroizing::new([0u8; KEY_SIZE]);
             Argon2::default().hash_password_into(password, &salt, &mut *key).unwrap();
             let cipher = XChaCha20Poly1305::new_from_slice(&*key).unwrap();
             if cipher.decrypt(&XNonce::from(nounce), Payload { msg: &ciphertext, aad: &path_bytes }).is_err() {
@@ -151,9 +155,9 @@ pub fn move_out(password: &[u8], settins: &Settings, name: &str) -> Result<(), E
 
     let mut file = File::open(settins.enc_dir.join(name)).map_err(|_| EncError::Read)?;
 
-    let mut salt = [0u8; 16];
+    let mut salt = [0u8; SALT_SIZE];
     let mut nounce = [0u8; NOUNCE_SIZE];
-    let mut path_size = [0u8; 4];
+    let mut path_size = [0u8; PATH_SIZE_BYTES];
     let mut cypehr = Vec::new();
     file.read_exact(&mut salt).map_err(|_| EncError::Read)?;
     file.read_exact(&mut nounce).map_err(|_| EncError::Read)?;
@@ -169,7 +173,7 @@ pub fn move_out(password: &[u8], settins: &Settings, name: &str) -> Result<(), E
 
     file.read_to_end(&mut cypehr).map_err(|_| EncError::Read)?;
 
-    let mut key = Zeroizing::new([0u8; 32]);
+    let mut key = Zeroizing::new([0u8; KEY_SIZE]);
     Argon2::default().hash_password_into(password, &salt, &mut *key).unwrap();
 
     let path = String::from_utf8(path).map_err(|_| EncError::Read)?;
