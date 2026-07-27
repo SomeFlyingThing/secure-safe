@@ -1,7 +1,5 @@
 use std::{
-    fs::{self, File, OpenOptions},
-    io::{Cursor, Read, Seek, Write},
-    path::{Path, PathBuf},
+    fs::{self, File, OpenOptions}, io::{Cursor, Read, Seek, Write}, os::unix::fs::MetadataExt, path::{Path, PathBuf},
 };
 
 use argon2::{Argon2, password_hash::SaltString};
@@ -94,7 +92,7 @@ impl Safe<Raw> {
 pub fn overwrite(path: &Path) {
     let mut file = OpenOptions::new().write(true).read(true).open(path).unwrap();
 
-    let size = file.metadata().iter().len();
+    let size = file.metadata().unwrap().size();
 
     let bytes = vec![0u8; size];
 
