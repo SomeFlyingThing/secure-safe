@@ -1,67 +1,110 @@
-# secure_safe
+<div align="center">
 
-`secure_safe` is a small command-line vault for locally storing encrypted files. It compresses a file, encrypts it with a key derived from your password, and saves the encrypted entry in a private vault directory.
+# 🔐 secure_safe
 
-## How it works
+### A small, local command-line vault for files that should stay yours.
 
-- Files are compressed with Zstandard before storage.
-- Encryption uses XChaCha20-Poly1305, which also detects tampering and incorrect passwords.
-- Encryption keys are derived from the password using Argon2 and a fresh random salt for every file.
-- The original path is kept inside the encrypted entry so a restored file returns to its original location.
+<p>
+  <img alt="Rust" src="https://img.shields.io/badge/Rust-2024-DEA584?logo=rust&logoColor=white">
+  <img alt="Encryption" src="https://img.shields.io/badge/Encryption-XChaCha20--Poly1305-6E56CF?logo=letsencrypt&logoColor=white">
+  <img alt="Key derivation" src="https://img.shields.io/badge/Key%20derivation-Argon2-1F8AC0">
+  <img alt="Storage" src="https://img.shields.io/badge/Storage-local%20only-2EA44F">
+</p>
 
-On first use, the application creates:
+<p><code>secure_safe</code> compresses and encrypts files locally, then keeps them in a private vault directory.</p>
 
-- `~/.safe_dir/` — the default directory containing encrypted files.
-- `~/secure_safe.settings` — a TOML settings file that can point `enc_dir` at a different vault location.
+</div>
 
-## Install
+<br>
 
-You need a current Rust toolchain. Build an optimized binary with:
+## ✨ What it does
+
+| | |
+| :-- | :-- |
+| 🗜️ **Compresses first** | Reduces file size with Zstandard before storage. |
+| 🔒 **Encrypts locally** | Uses authenticated XChaCha20-Poly1305 encryption. |
+| 🧂 **Derives strong keys** | Uses Argon2 with a fresh random salt for every file. |
+| 📍 **Remembers where files came from** | Restores each file to its original path. |
+| 🛡️ **Checks integrity** | Detects tampering and incorrect passwords during verification. |
+
+> [!IMPORTANT]
+> This is a local vault, not a backup service. Keep a safe copy of anything you cannot afford to lose.
+
+## 🚀 Install
+
+You need a current [Rust toolchain](https://www.rust-lang.org/tools/install).
 
 ```sh
 cargo build --release
 ```
 
-The binary will be available at `target/release/secure_safe`.
+Your optimized binary will be at:
 
-## Usage
+```text
+target/release/secure_safe
+```
+
+## ⚡ Quick start
+
+```sh
+# Encrypt and store a file
+secure_safe add secret.txt
+
+# Verify every vault entry with your password
+secure_safe check
+
+# Restore a file to its original path, then remove its vault entry
+secure_safe mo secret.txt
+```
+
+## 🧰 Commands
 
 ```text
 secure_safe <COMMAND> [PATH]
 ```
 
-| Command | Description |
-| --- | --- |
-| `add <PATH>` | Encrypt and store a file. |
-| `rm <NAME>` | Permanently remove an encrypted entry from the vault. |
-| `mo <NAME>` | Decrypt, restore, and remove an encrypted entry from the vault. |
-| `check` | Verify every stored entry using the supplied password. |
-| `help` | Display command help. |
+<table>
+  <thead>
+    <tr><th align="left">Command</th><th align="left">What it does</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>add &lt;PATH&gt;</code></td><td>Encrypt and store a file.</td></tr>
+    <tr><td><code>rm &lt;NAME&gt;</code></td><td>Permanently remove an encrypted vault entry.</td></tr>
+    <tr><td><code>mo &lt;NAME&gt;</code></td><td>Decrypt to the original path, then remove the vault entry.</td></tr>
+    <tr><td><code>check</code></td><td>Verify every stored entry with the supplied password.</td></tr>
+    <tr><td><code>help</code></td><td>Show command help.</td></tr>
+  </tbody>
+</table>
 
-Long forms are also supported: `--add`, `--rm`, `--mo`, `--check`, and `--help`.
+Long forms are available too: `--add`, `--rm`, `--mo`, `--check`, and `--help`.
 
-Examples:
+### Example session
 
 ```sh
-secure_safe add secret.txt
+secure_safe add documents/secret.txt
 secure_safe check
 secure_safe mo secret.txt
 secure_safe rm secret.txt
 ```
 
-`rm` and `mo` take the stored file name, not a path. Stored names are the original file's base name. For example, `secure_safe add documents/secret.txt` creates the entry `secret.txt`.
+<details>
+  <summary><strong>About stored names</strong></summary>
+  <br>
+  Vault entries use the source file's base name. For example, adding
+  <code>documents/secret.txt</code> stores an entry named <code>secret.txt</code>.
+  Files with the same base name conflict, even if they came from different directories.
+</details>
 
-## Important notes
+## 🗂️ Vault location
 
-- Keep your password safe. There is no password recovery mechanism.
-- Adding a file does **not** delete the original plaintext file. Delete it yourself only after confirming the encrypted entry can be restored.
-- Restoring an entry writes to its original path and then removes the encrypted vault entry. If a file already exists at the original path, restoration fails rather than overwriting it.
-- Entries with the same base filename conflict in the vault, even when their original paths differ.
-- `check` confirms that entries can be authenticated with the entered password; it prints each verified stored filename.
+On first use, `secure_safe` creates:
 
-## Configure the vault directory
+```text
+~/.safe_dir/              # encrypted files
+~/secure_safe.settings    # TOML configuration
+```
 
-Edit `~/secure_safe.settings` to set another directory:
+Set another vault location by editing `~/secure_safe.settings`:
 
 ```toml
 enc_dir = "/absolute/path/to/my-vault"
@@ -69,10 +112,22 @@ enc_dir = "/absolute/path/to/my-vault"
 
 The directory is created automatically when the program runs.
 
-## Development
+## ⚠️ Before you trust it with a file
 
-Run the test suite with:
+> [!WARNING]
+> There is no password recovery. If you lose your password, the encrypted data cannot be recovered.
+
+- `add` **does not delete** the original plaintext file. Remove it yourself only after you have confirmed that restoration works.
+- `mo` restores the file to its original location, then removes the encrypted vault entry.
+- Restoration refuses to overwrite an existing file at the original path.
+- `check` authenticates every entry using the entered password and prints each verified stored filename.
+
+## 🛠️ Development
 
 ```sh
 cargo test
 ```
+
+<div align="center">
+  <sub>Keep the key. Keep control.</sub>
+</div>
