@@ -1,6 +1,6 @@
 use std::{
     fs::{self, File, OpenOptions},
-    io::{Cursor, Read, Write},
+    io::{Cursor, Read, Seek, Write},
     path::{Path, PathBuf},
 };
 
@@ -89,7 +89,17 @@ impl Safe<Raw> {
         file.write_all(&self.state.ciphertext).unwrap();
     }
 }
+pub fn overwrite(path: &Path) {
+    let mut file = OpenOptions::new().write(true).read(true).open(path).unwrap();
 
+    let size = file.metadata().iter().len();
+
+    let bytes = vec![0u8; size];
+
+    file.seek(std::io::SeekFrom::Start(0)).unwrap();
+    file.write_all(&bytes).unwrap();
+    file.sync_all().unwrap();
+}
 pub fn remove(name: &str, settings: &Settings) {
     if Path::new(name).file_name().and_then(|name| name.to_str()) != Some(name) {
         eprintln!("invalid stored file name");
@@ -97,6 +107,7 @@ pub fn remove(name: &str, settings: &Settings) {
     }
 
     let path = settings.enc_dir.join(name);
+    overwrite(&path);
     fs::remove_file(path).unwrap();
 }
 
@@ -192,6 +203,7 @@ pub fn move_out(password: &[u8], settins: &Settings, name: &str) -> Result<(), E
     let mut file = OpenOptions::new().create_new(true).write(true).open(&temporary).map_err(|_| EncError::Read)?;
     file.write_all(&decomp).map_err(|_| EncError::Read)?;
     fs::rename(temporary, path).map_err(|_| EncError::Read)?;
+
     remove(name, settins);
     Ok(())
 }
