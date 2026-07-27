@@ -27,6 +27,7 @@ fn main() {
             let password = ask_password();
             let new = Safe::new(&name, password.as_bytes());
             new.store(&settings);
+            remove(&name, &settings);
         },
         Flags::Remove(name) => {
             let mut answer = String::new();
@@ -111,7 +112,7 @@ fn parse() -> Flags {
 
     {}
 
-        {:<HELP_COLUMN_WIDTH$} Encrypt and securely store a file
+        {:<HELP_COLUMN_WIDTH$} Encrypt, store, and remove the original file
         {:<HELP_COLUMN_WIDTH$} Permanently remove a stored file
                           {}
         {:<HELP_COLUMN_WIDTH$} Decrypt and restore a stored file

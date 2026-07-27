@@ -11,7 +11,7 @@
   <img alt="Storage" src="https://img.shields.io/badge/Storage-local%20only-2EA44F">
 </p>
 
-<p><code>secure_safe</code> compresses and encrypts files locally, then keeps them in a private vault directory.</p>
+<p><code>secure_safe</code> compresses and encrypts files locally, then keeps only the encrypted copy in a private vault directory.</p>
 
 </div>
 
@@ -25,6 +25,7 @@
 | 🔒 **Encrypts locally** | Uses authenticated XChaCha20-Poly1305 encryption. |
 | 🧂 **Derives strong keys** | Uses Argon2 with a fresh random salt for every file. |
 | 📍 **Remembers where files came from** | Restores each file to its original path. |
+| 🧹 **Removes plaintext after adding** | Securely overwrites and deletes the source file once it is stored. |
 | 🛡️ **Checks integrity** | Detects tampering and incorrect passwords during verification. |
 
 > [!IMPORTANT]
@@ -47,7 +48,7 @@ target/release/secure_safe
 ## ⚡ Quick start
 
 ```sh
-# Encrypt and store a file
+# Encrypt and store a file; the original is securely removed
 secure_safe add secret.txt
 
 # Verify every vault entry with your password
@@ -68,7 +69,7 @@ secure_safe <COMMAND> [PATH]
     <tr><th align="left">Command</th><th align="left">What it does</th></tr>
   </thead>
   <tbody>
-    <tr><td><code>add &lt;PATH&gt;</code></td><td>Encrypt and store a file.</td></tr>
+    <tr><td><code>add &lt;PATH&gt;</code></td><td>Encrypt and store a file, then securely overwrite and remove the original.</td></tr>
     <tr><td><code>rm &lt;NAME&gt;</code></td><td>Permanently remove an encrypted vault entry.</td></tr>
     <tr><td><code>mo &lt;NAME&gt;</code></td><td>Decrypt to the original path, then remove the vault entry.</td></tr>
     <tr><td><code>check</code></td><td>Verify every stored entry with the supplied password.</td></tr>
@@ -117,7 +118,7 @@ The directory is created automatically when the program runs.
 > [!WARNING]
 > There is no password recovery. If you lose your password, the encrypted data cannot be recovered.
 
-- `add` **does not delete** the original plaintext file. Remove it yourself only after you have confirmed that restoration works.
+- `add` securely overwrites and deletes the original plaintext file after creating the encrypted vault entry. Confirm that the path and password are correct before running it.
 - `mo` restores the file to its original location, then removes the encrypted vault entry.
 - Restoration refuses to overwrite an existing file at the original path.
 - `check` authenticates every entry using the entered password and prints each verified stored filename.

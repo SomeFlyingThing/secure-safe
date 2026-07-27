@@ -87,6 +87,8 @@ impl Safe<Raw> {
         file.write_all(&(self.state.path.len() as u32).to_le_bytes()).unwrap();
         file.write_all(&self.state.path).unwrap();
         file.write_all(&self.state.ciphertext).unwrap();
+
+        
     }
 }
 pub fn overwrite(path: &Path) {
