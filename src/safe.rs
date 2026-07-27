@@ -94,7 +94,7 @@ pub fn overwrite(path: &Path) {
 
     let size = file.metadata().unwrap().size();
 
-    let bytes = vec![0u8; size];
+    let bytes = vec![0u8; size as usize];
 
     file.seek(std::io::SeekFrom::Start(0)).unwrap();
     file.write_all(&bytes).unwrap();
