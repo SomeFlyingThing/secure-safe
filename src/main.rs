@@ -1,4 +1,4 @@
-use std::{env::args, io, process::exit};
+use std::{env::args, fs, io, path::Path, process::exit};
 
 use owo_colors::OwoColorize;
 use zeroize::Zeroizing;
@@ -27,7 +27,7 @@ fn main() {
             let password = ask_password();
             let new = Safe::new(&name, password.as_bytes());
             new.store(&settings);
-            remove(&name, &settings);
+            delete_file(&name);
         },
         Flags::Remove(name) => {
             let mut answer = String::new();
@@ -174,4 +174,10 @@ fn parse() -> Flags {
             exit(EXIT_FAILURE);
         }
     }
+}
+
+fn delete_file(path: &str) {
+    fs::remove_file(path).unwrap_or_else(|_| {
+        println!("coundnt remove the file, remove it manually");
+    });
 }
