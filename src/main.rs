@@ -10,6 +10,7 @@ use crate::{
 
 mod safe;
 mod settings;
+mod navigation;
 
 const EXIT_SUCCESS: i32 = 0;
 const EXIT_FAILURE: i32 = 1;
