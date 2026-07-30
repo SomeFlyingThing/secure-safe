@@ -1,6 +1,6 @@
 <div align="center">
   <h1>🔐 secure_safe</h1>
-  <p><strong>An experimental local encrypted-file vault written in Rust.</strong></p>
+  <p><strong>An experimental, local encrypted-file vault written in Rust.</strong></p>
   <p>
     <img alt="Rust 2024" src="https://img.shields.io/badge/Rust-2024-DEA584?logo=rust&amp;logoColor=white">
     <img alt="XChaCha20-Poly1305" src="https://img.shields.io/badge/encryption-XChaCha20--Poly1305-6E56CF">
@@ -9,178 +9,152 @@
   </p>
 </div>
 
-<hr>
+> [!CAUTION]
+> Do not use this version as the only copy of important files. The project is unaudited and pre-alpha. Vault operations are not transactional or fully crash-safe, and an interruption at the wrong time can cause data loss.
 
-<blockquote>
-  <p><strong>Do not use this version as the only copy of important files.</strong> The project is unaudited and pre-alpha. Writes are not yet atomic or crash-safe, and some error paths still panic.</p>
-</blockquote>
+`secure_safe` compresses a file, encrypts it into a vault on the local filesystem, and then attempts to remove the plaintext source. It can later authenticate, decrypt, decompress, and restore the file to the path recorded when it was added.
 
-<h2>What it does</h2>
+## How it works
 
-<p><code>secure_safe</code> compresses a file, encrypts it into a local vault, and removes the original. A stored file can later be authenticated, decrypted, decompressed, and restored to its original path.</p>
+When a file is added, `secure_safe`:
 
-<table>
-  <tbody>
-    <tr>
-      <td>🗜️ <strong>Compression</strong></td>
-      <td>Zstandard level 5 before encryption.</td>
-    </tr>
-    <tr>
-      <td>🧂 <strong>Key derivation</strong></td>
-      <td>Argon2 with a fresh random 16-byte salt for each file.</td>
-    </tr>
-    <tr>
-      <td>🔒 <strong>Encryption</strong></td>
-      <td>Authenticated XChaCha20-Poly1305 with a fresh 24-byte nonce.</td>
-    </tr>
-    <tr>
-      <td>📍 <strong>Path binding</strong></td>
-      <td>The original path is stored and authenticated as associated data.</td>
-    </tr>
-    <tr>
-      <td>🧹 <strong>Secret handling</strong></td>
-      <td>Entered passwords and derived keys use zeroizing wrappers.</td>
-    </tr>
-  </tbody>
-</table>
+1. Reads the entire file into memory and compresses it with Zstandard level 5.
+2. Generates a random 16-byte salt and derives a 32-byte key from the password using the default Argon2 parameters.
+3. Generates a random 24-byte nonce and encrypts the compressed bytes with XChaCha20-Poly1305.
+4. Authenticates the original path as associated data.
+5. Creates a mode-`0600` vault entry named after the source file's basename.
+6. Attempts to delete the original file after the vault entry has been written.
 
-<p>These are implementation details, not a security guarantee.</p>
+Passwords and derived keys are held in zeroizing wrappers. Each file has its own salt and may use a different password; there is no global vault password or password database.
 
-<h2>Build</h2>
+These are implementation details, not a security guarantee. The vault filename and recorded original path are **not encrypted**. Only the compressed file contents are encrypted; the path is plaintext but authenticated.
 
-<p>Install a current Rust toolchain, clone the repository, and run:</p>
+## Requirements and build
 
-<pre><code>cargo build --release
-./target/release/secure_safe help</code></pre>
+- A Unix-like operating system. The current implementation uses Unix-specific filesystem APIs.
+- A Rust toolchain with Rust 2024 edition support.
+- A C toolchain required by the `zstd` dependency.
 
-<p>For development:</p>
+Build the release binary:
 
-<pre><code>cargo build
-cargo test</code></pre>
+```console
+cargo build --release
+./target/release/secure_safe help
+```
 
-<h2>Usage</h2>
+Run the test suite during development:
 
-<pre><code>secure_safe &lt;COMMAND&gt; [PATH]</code></pre>
+```console
+cargo test
+```
 
-<table>
-  <thead>
-    <tr>
-      <th align="left">Command</th>
-      <th align="left">Behavior</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td><code>add &lt;PATH&gt;</code></td>
-      <td>Compresses and encrypts a file into the vault, then removes the source file.</td>
-    </tr>
-    <tr>
-      <td><code>rm &lt;NAME&gt;</code></td>
-      <td>After confirmation, overwrites the named vault entry with zero bytes and removes it.</td>
-    </tr>
-    <tr>
-      <td><code>mo &lt;NAME&gt;</code></td>
-      <td>Decrypts and restores the named vault entry to its recorded path, then removes the vault entry.</td>
-    </tr>
-    <tr>
-      <td><code>check</code></td>
-      <td>Attempts to authenticate every stored entry with the supplied password.</td>
-    </tr>
-    <tr>
-      <td><code>help</code></td>
-      <td>Prints command help.</td>
-    </tr>
-  </tbody>
-</table>
+## Usage
 
-<p>Long forms are also accepted: <code>--add</code>, <code>--rm</code>, <code>--mo</code>, <code>--check</code>, and <code>--help</code>.</p>
+```text
+secure_safe <COMMAND> [PATH]
+```
 
-<h3>Examples</h3>
+| Command | Behavior |
+| --- | --- |
+| `add [PATH]` | Compresses and encrypts a file, stores it in the vault, then attempts to remove the source. Opens the source-file explorer when `PATH` is omitted. |
+| `mo [NAME]` | Restores a vault entry to its recorded path, then overwrites and removes the vault entry. Opens the vault explorer when `NAME` is omitted. |
+| `rm [NAME]` | After confirmation, overwrites the selected vault entry with zero bytes and removes it. Opens the vault explorer when `NAME` is omitted. |
+| `check` | Tries to authenticate every regular file in the vault with the entered password. Successful filenames are printed; invalid or unauthenticated entries are reported to stderr. |
+| `help` | Prints command help. |
 
-<pre><code># Encrypt a file and remove the plaintext source
-secure_safe add ~/Documents/secret.txt
+The long forms `--add`, `--mo`, `--rm`, `--check`, and `--help` are also accepted. `-h` and `--h` are accepted as help aliases.
 
-# Restore it to ~/Documents/secret.txt
+Every operation that asks for a password also asks for confirmation. A wrong password during `mo` prompts again; press `Ctrl+C` to stop retrying.
+
+### Examples
+
+```console
+# Encrypt a file and attempt to remove the plaintext source.
+# An absolute path makes the later restore location unambiguous.
+secure_safe add /home/alice/Documents/secret.txt
+
+# Restore the entry to /home/alice/Documents/secret.txt
 secure_safe mo secret.txt
 
-# Check all vault entries with a password
+# Authenticate entries that use this password
 secure_safe check
 
 # Permanently remove an entry without restoring it
-secure_safe rm secret.txt</code></pre>
+secure_safe rm secret.txt
+```
 
-<h2>Built-in file explorer</h2>
+`NAME` must be a bare vault filename, not a path. Because vault entries use only the source basename, `report.txt` is the entry name regardless of the source directory.
 
-<p>Run a file command without its path or name to select a file interactively. For <code>add</code>, the explorer starts in your home directory and lets you browse for a source file. For <code>rm</code> and <code>mo</code>, it shows only files in the configured vault.</p>
+## Interactive file explorer
 
-<table>
-  <thead>
-    <tr>
-      <th align="left">Key</th>
-      <th align="left">Action</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr><td><code>↑</code> / <code>↓</code></td><td>Move the selection.</td></tr>
-    <tr><td><code>→</code></td><td>Open the selected directory.</td></tr>
-    <tr><td><code>←</code></td><td>Go to the parent directory.</td></tr>
-    <tr><td><code>Enter</code></td><td>Choose the selected file.</td></tr>
-    <tr><td><code>q</code> / <code>Esc</code></td><td>Quit.</td></tr>
-  </tbody>
-</table>
+Run `add`, `mo`, or `rm` without the optional argument to choose a file interactively.
 
-<p>Directory navigation is available for <code>add</code>. The <code>rm</code> and <code>mo</code> views are intentionally limited to vault entries.</p>
+- `add` starts in the home directory and permits directory navigation.
+- `mo` and `rm` show regular files directly inside the configured vault; directories are hidden and cannot be opened.
 
-<h2>Storage</h2>
+| Key | Action |
+| --- | --- |
+| `↑` / `↓` | Move the selection. |
+| `→` | Open the selected directory in the `add` explorer. |
+| `←` | Go to the parent directory in the `add` explorer. |
+| `Enter` | Choose the selected file. |
+| `q` / `Esc` | Quit. |
 
-<p>On first use, the program creates:</p>
+The explorer requires an interactive terminal.
 
-<table>
-  <thead>
-    <tr>
-      <th align="left">Path</th>
-      <th align="left">Purpose</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td><code>~/.safe_dir/</code></td>
-      <td>Default encrypted-entry directory.</td>
-    </tr>
-    <tr>
-      <td><code>~/secure_safe.settings</code></td>
-      <td>TOML settings file containing <code>enc_dir</code>.</td>
-    </tr>
-  </tbody>
-</table>
+## Configuration and storage
 
-<p>To use a different vault directory, edit the settings file:</p>
+On the first non-help command, `secure_safe` creates:
 
-<pre><code>enc_dir = "/absolute/path/to/my-vault"</code></pre>
+| Path | Purpose |
+| --- | --- |
+| `~/.safe_dir/` | Default vault directory containing encrypted entries. |
+| `~/secure_safe.settings` | TOML settings file containing the `enc_dir` path. |
 
-<h2>Known limitations</h2>
+To use another vault directory, edit `~/secure_safe.settings`:
 
-<ul>
-  <li>There is no password recovery. Each file is decrypted with the password used when it was added.</li>
-  <li>Vault writes and source deletion are not atomic or explicitly synced. A crash or power loss at the wrong time can cause data loss.</li>
-  <li>Several I/O and parsing paths still use <code>unwrap</code>, <code>expect</code>, or <code>panic</code>.</li>
-  <li>Vault entries use only the source base filename, so files with the same name conflict even when they come from different directories.</li>
-  <li>Restoring can replace a file already present at the recorded path.</li>
-  <li>Overwriting before unlinking does not guarantee physical erasure on SSDs, copy-on-write filesystems, snapshots, journals, or remote storage.</li>
-  <li>The on-disk format is not versioned and may change without migration support.</li>
-  <li>The implementation has not received an independent security audit.</li>
-</ul>
+```toml
+enc_dir = "/absolute/path/to/my-vault"
+```
 
-<h2>Before production use</h2>
+The directory is created automatically when the settings are loaded.
 
-<ol>
-  <li>Make vault writes and source deletion durable, atomic, and recoverable.</li>
-  <li>Replace panic-based error handling across file and cryptographic operations.</li>
-  <li>Prevent accidental overwrite when restoring and define conflict behavior.</li>
-  <li>Version and document the on-disk format.</li>
-  <li>Add broader failure-path and interruption tests.</li>
-  <li>Obtain a focused independent security review.</li>
-</ol>
+### Entry format
+
+Each vault entry currently contains, in order:
+
+```text
+16-byte salt
+24-byte nonce
+4-byte little-endian original-path length
+original path bytes (plaintext, authenticated)
+XChaCha20-Poly1305 ciphertext and authentication tag
+```
+
+The format has no magic bytes or version field and may change without migration support.
+
+## Important limitations
+
+- **No password recovery:** forgetting a file's password makes that file unrecoverable.
+- **Not a backup:** a successful `add` is designed to delete the source. Keep independent backups of important data.
+- **Non-transactional writes:** vault writes, source deletion, restoration, and vault deletion do not form one atomic operation. Not every write is explicitly synced to stable storage.
+- **Whole-file memory use:** adding, restoring, and authenticating an entry load its encrypted or plaintext contents into memory. This is unsuitable for very large files.
+- **Metadata exposure:** vault filenames reveal source basenames, and each entry stores its original path in plaintext.
+- **Basename collisions:** two source files with the same basename map to the same vault entry. The second `add` fails while the first entry exists.
+- **Relative paths:** the exact path supplied to `add` is recorded. If it is relative, restoration resolves it from the process's current working directory, which may not be the original directory.
+- **Restore conflicts:** restoration can replace an existing file at the recorded path on Unix. It also fails if the sibling temporary path (with extension `secure_safe.tmp`) already exists or if the parent directory is missing.
+- **Limited checking:** `check` authenticates ciphertext but does not decompress it, validate its eventual restore destination, or produce a failing process status merely because an individual entry fails authentication.
+- **Best-effort erasure:** overwriting before unlinking does not guarantee physical erasure on SSDs, copy-on-write filesystems, journaled filesystems, snapshots, backups, or remote storage.
+- **Terminal behavior:** password prompts and the file explorer expect an interactive terminal. Passwords must currently be entered twice even for restore and check operations.
+- **Unaudited cryptography:** the design and implementation have not received an independent security review.
+
+## Development priorities
+
+Before this project should be considered for production use, it needs transactional and durable file operations, explicit restore-conflict handling, a versioned format, streaming I/O, clearer command outcomes and exit statuses, broader interruption and failure-path tests, and an independent security review.
+
+## License
+
+Licensed under the [Apache License 2.0](LICENSE).
 
 <div align="center">
   <sub>Experimental cryptography code: inspect first, trust later.</sub>
