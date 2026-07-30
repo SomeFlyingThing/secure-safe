@@ -10,7 +10,7 @@
 </div>
 
 > [!CAUTION]
-> Do not use this version as the only copy of important files. The project is unaudited and pre-alpha. Vault operations are not transactional or fully crash-safe, and an interruption at the wrong time can cause data loss.
+> Do not use this version as the only copy of important files. The project is unaudited and pre-alpha. Although add and restore now durably commit their output before removing the prior copy, the complete vault workflow is not transactional and has not been audited for every filesystem and failure mode.
 
 `secure_safe` compresses a file, encrypts it into a vault on the local filesystem, and then attempts to remove the plaintext source. It can later authenticate, decrypt, decompress, and restore the file to the path recorded when it was added.
 
@@ -22,8 +22,9 @@ When a file is added, `secure_safe`:
 2. Generates a random 16-byte salt and derives a 32-byte key from the password using the default Argon2 parameters.
 3. Generates a random 24-byte nonce and encrypts the compressed bytes with XChaCha20-Poly1305.
 4. Authenticates the original path as associated data.
-5. Creates a mode-`0600` vault entry named after the source file's basename.
-6. Attempts to delete the original file after the vault entry has been written.
+5. Writes a mode-`0600` temporary vault entry and syncs its contents to stable storage.
+6. Atomically publishes the entry under the source file's basename without replacing an existing entry, then syncs the vault directory.
+7. Attempts to delete the original file only after the encrypted entry is durable.
 
 Passwords and derived keys are held in zeroizing wrappers. Each file has its own salt and may use a different password; there is no global vault password or password database.
 
@@ -137,7 +138,7 @@ The format has no magic bytes or version field and may change without migration 
 
 - **No password recovery:** forgetting a file's password makes that file unrecoverable.
 - **Not a backup:** a successful `add` is designed to delete the source. Keep independent backups of important data.
-- **Non-transactional writes:** vault writes, source deletion, restoration, and vault deletion do not form one atomic operation. Not every write is explicitly synced to stable storage.
+- **Non-transactional workflow:** add and restore sync their new file and parent directory before removing the prior copy, but each full operation still spans multiple filesystem actions. An interruption can leave redundant source, temporary, or vault files that require manual cleanup.
 - **Whole-file memory use:** adding, restoring, and authenticating an entry load its encrypted or plaintext contents into memory. This is unsuitable for very large files.
 - **Metadata exposure:** vault filenames reveal source basenames, and each entry stores its original path in plaintext.
 - **Basename collisions:** two source files with the same basename map to the same vault entry. The second `add` fails while the first entry exists.

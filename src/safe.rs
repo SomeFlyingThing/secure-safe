@@ -32,6 +32,31 @@ const MAX_PATH_SIZE: usize = 16 * 1024;
 const PATH_SIZE_BYTES: usize = size_of::<u32>();
 const COMPRESSION_LEVEL: i32 = 5;
 
+fn sync_parent(path: &Path) -> io::Result<()> {
+    let parent = path.parent().filter(|parent| !parent.as_os_str().is_empty()).unwrap_or_else(|| Path::new("."));
+    File::open(parent)?.sync_all()
+}
+
+fn temporary_path(final_path: &Path) -> io::Result<PathBuf> {
+    let name = final_path.file_name().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "path has no file name"))?;
+    let mut random = [0u8; 8];
+    OsRng.fill_bytes(&mut random);
+
+    let mut temporary_name = name.to_os_string();
+    temporary_name.push(format!(".secure_safe.tmp.{:016x}", u64::from_le_bytes(random)));
+    Ok(final_path.with_file_name(temporary_name))
+}
+
+struct TemporaryFile {
+    path: PathBuf,
+}
+
+impl Drop for TemporaryFile {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
+    }
+}
+
 pub struct Raw {
     pub salt: [u8; SALT_SIZE],
     pub nounce: [u8; NOUNCE_SIZE],
@@ -81,14 +106,28 @@ impl Safe<Raw> {
 
 impl Safe<Raw> {
     pub fn store(self, settins: &Settings) -> io::Result<()> {
-        let path = settins.enc_dir.join(self.state.name.clone());
+        let path = settins.enc_dir.join(&self.state.name);
+        if path.try_exists()? {
+            return Err(io::Error::new(io::ErrorKind::AlreadyExists, "vault entry already exists"));
+        }
 
-        let mut file = OpenOptions::new().mode(0o600).create_new(true).write(true).open(path)?;
+        let temporary = TemporaryFile { path: temporary_path(&path)? };
+        let mut file = OpenOptions::new().mode(0o600).create_new(true).write(true).open(&temporary.path)?;
+
         file.write_all(&self.state.salt)?;
         file.write_all(&self.state.nounce)?;
         file.write_all(&(self.state.path.len() as u32).to_le_bytes())?;
         file.write_all(&self.state.path)?;
         file.write_all(&self.state.ciphertext)?;
+        file.sync_all()?;
+
+        // Publishing with a hard link is atomic and, unlike rename(), cannot
+        // replace an entry created by another process after the check above.
+        fs::hard_link(&temporary.path, &path)?;
+        sync_parent(&path)?;
+
+        fs::remove_file(&temporary.path)?;
+        sync_parent(&path)?;
 
         Ok(())
     }
@@ -225,7 +264,9 @@ pub fn move_out(password: &[u8], settins: &Settings, name: &str) -> Result<(), E
     let temporary = PathBuf::from(&path).with_extension("secure_safe.tmp");
     let mut file = OpenOptions::new().create_new(true).write(true).open(&temporary).map_err(|_| EncError::Read)?;
     file.write_all(&decomp).map_err(|_| EncError::Read)?;
-    fs::rename(temporary, path).map_err(|_| EncError::Read)?;
+    file.sync_all().map_err(EncError::Io)?;
+    fs::rename(&temporary, &path).map_err(|_| EncError::Read)?;
+    sync_parent(Path::new(&path)).map_err(EncError::Io)?;
 
     remove(name, settins).map_err(EncError::Io)?;
     Ok(())
@@ -251,10 +292,31 @@ mod tests {
         fs::write(&source, contents)?;
 
         Safe::new(source.to_str().context("source path is not valid UTF-8")?, b"password")?.store(&settings)?;
+        assert_eq!(fs::read_dir(&settings.enc_dir)?.count(), 1);
         fs::remove_file(&source)?;
         move_out(b"password", &settings, "source.bin")?;
 
         assert_eq!(fs::read(&source)?, contents);
+        fs::remove_dir_all(dir)?;
+        Ok(())
+    }
+
+    #[test]
+    fn store_does_not_replace_an_existing_entry() -> anyhow::Result<()> {
+        let dir = std::env::temp_dir().join(format!("secure-safe-collision-{}", std::process::id()));
+        let source = dir.join("source.bin");
+        let settings = Settings { enc_dir: dir.join("vault") };
+        let stored = settings.enc_dir.join("source.bin");
+
+        fs::create_dir_all(&settings.enc_dir)?;
+        fs::write(&source, b"new contents")?;
+        fs::write(&stored, b"existing entry")?;
+
+        let error = Safe::new(source.to_str().context("source path is not valid UTF-8")?, b"password")?.store(&settings).unwrap_err();
+
+        assert_eq!(error.kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(fs::read(&stored)?, b"existing entry");
+        assert_eq!(fs::read_dir(&settings.enc_dir)?.count(), 1);
         fs::remove_dir_all(dir)?;
         Ok(())
     }
