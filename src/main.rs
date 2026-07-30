@@ -195,7 +195,7 @@ fn parse() -> Flags {
         help();
     });
 
-    if arg == "--help" || arg == "help" {
+    if arg == "--help" || arg == "help" || arg == "-h" || arg == "--h"{
         help();
     } else if arg == "--check" || arg == "check" {
         Flags::Check
