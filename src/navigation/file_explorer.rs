@@ -218,16 +218,17 @@ mod tests {
     }
 
     #[test]
-    fn flat_explorer_hides_directories() {
+    fn flat_explorer_hides_directories() -> io::Result<()> {
         let directory = std::env::temp_dir().join(format!("secure-safe-explorer-{}", std::process::id()));
         let nested = directory.join("nested");
         let file = directory.join("entry.safe");
-        fs::create_dir_all(&nested).unwrap();
-        fs::write(&file, []).unwrap();
+        fs::create_dir_all(&nested)?;
+        fs::write(&file, [])?;
 
-        let entries = explorer_entries(&directory, false).unwrap();
+        let entries = explorer_entries(&directory, false)?;
 
         assert_eq!(entries, vec![file]);
-        fs::remove_dir_all(directory).unwrap();
+        fs::remove_dir_all(directory)?;
+        Ok(())
     }
 }

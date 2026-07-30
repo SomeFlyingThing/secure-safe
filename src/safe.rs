@@ -1,7 +1,11 @@
 use std::{
-    fs::{self, File, OpenOptions}, io::{Cursor, Read, Seek, Write}, os::unix::fs::MetadataExt, path::{Path, PathBuf},
+    fs::{self, File, OpenOptions},
+    io::{self, Cursor, Read, Seek, Write},
+    os::unix::fs::{MetadataExt, OpenOptionsExt},
+    path::{Path, PathBuf},
 };
 
+use anyhow::Context;
 use argon2::{Argon2, password_hash::SaltString};
 use chacha20poly1305::{
     KeyInit, XChaCha20Poly1305, XNonce,
@@ -12,13 +16,13 @@ use zeroize::Zeroizing;
 
 use crate::settings::Settings;
 
-fn read_file(path: &str) -> Vec<u8> {
-    let mut file = File::open(path).expect("couldnt read the file check the path");
+fn read_file(path: &str) -> io::Result<Vec<u8>> {
+    let mut file = File::open(path)?;
 
     let mut bytes = Vec::new();
-    file.read_to_end(&mut bytes).unwrap();
+    file.read_to_end(&mut bytes)?;
 
-    bytes
+    Ok(bytes)
 }
 
 const SALT_SIZE: usize = 16;
@@ -41,84 +45,87 @@ pub struct Safe<State> {
 }
 
 impl Safe<Raw> {
-    pub fn new(path: &str, password: &[u8]) -> Self {
+    pub fn new(path: &str, password: &[u8]) -> anyhow::Result<Self> {
         //read and compress
-        let contents = read_file(path);
-        let contents = zstd::encode_all(Cursor::new(&contents), COMPRESSION_LEVEL).unwrap();
+        let contents = read_file(path)?;
+        let contents = zstd::encode_all(Cursor::new(&contents), COMPRESSION_LEVEL)?;
 
         let name = PathBuf::from(path);
-        let name = name.file_name().expect("not valid file name");
+        let name = name.file_name().context("not valid file name")?;
 
         let salt = SaltString::generate(&mut OsRng);
 
         let mut key = Zeroizing::new([0u8; KEY_SIZE]);
         let mut salt_bytes = [0u8; SALT_SIZE];
-        salt.as_salt().decode_b64(&mut salt_bytes).unwrap();
-        Argon2::default().hash_password_into(password, &salt_bytes, &mut *key).expect(obfstr::obfstr!("error deriving password"));
+        salt.as_salt().decode_b64(&mut salt_bytes)?;
+        Argon2::default().hash_password_into(password, &salt_bytes, &mut *key).context(obfstr::obfstr!("error deriving password").to_owned())?;
 
-        let cipher = XChaCha20Poly1305::new_from_slice(&*key).unwrap();
+        let cipher = XChaCha20Poly1305::new_from_slice(&*key)?;
 
         let mut nounce = [0u8; NOUNCE_SIZE];
         OsRng.fill_bytes(&mut nounce);
 
-        let ciphertext = cipher.encrypt(&nounce.into(), Payload { msg: &contents, aad: path.as_bytes() }).map_err(|_| "encryption failed").unwrap();
+        let ciphertext = cipher.encrypt(&nounce.into(), Payload { msg: &contents, aad: path.as_bytes() }).map_err(|_| anyhow::anyhow!("encryption failed"))?;
 
-        Self {
+        Ok(Self {
             state: Raw {
                 salt: salt_bytes,
-                name: name.to_str().unwrap().to_owned(),
+                name: name.to_str().context("file name is not valid UTF-8")?.to_owned(),
                 ciphertext,
                 path: path.as_bytes().to_vec(),
                 nounce,
             },
-        }
+        })
     }
 }
 
 impl Safe<Raw> {
-    pub fn store(self, settins: &Settings) {
+    pub fn store(self, settins: &Settings) -> io::Result<()> {
         let path = settins.enc_dir.join(self.state.name.clone());
 
-        let mut file = OpenOptions::new().create_new(true).write(true).open(path).unwrap();
-        file.write_all(&self.state.salt).unwrap();
-        file.write_all(&self.state.nounce).unwrap();
-        file.write_all(&(self.state.path.len() as u32).to_le_bytes()).unwrap();
-        file.write_all(&self.state.path).unwrap();
-        file.write_all(&self.state.ciphertext).unwrap();
+        let mut file = OpenOptions::new().mode(0o600).create_new(true).write(true).open(path)?;
+        file.write_all(&self.state.salt)?;
+        file.write_all(&self.state.nounce)?;
+        file.write_all(&(self.state.path.len() as u32).to_le_bytes())?;
+        file.write_all(&self.state.path)?;
+        file.write_all(&self.state.ciphertext)?;
 
-        
+        Ok(())
     }
 }
-pub fn overwrite(path: &Path) {
-    let mut file = OpenOptions::new().write(true).read(true).open(path).unwrap();
+pub fn overwrite(path: &Path) -> io::Result<()> {
+    let mut file = OpenOptions::new().write(true).read(true).open(path)?;
 
-    let size = file.metadata().unwrap().size();
+    let size = file.metadata()?.size();
 
     let bytes = vec![0u8; size as usize];
 
-    file.seek(std::io::SeekFrom::Start(0)).unwrap();
-    file.write_all(&bytes).unwrap();
-    file.sync_all().unwrap();
+    file.seek(std::io::SeekFrom::Start(0))?;
+    file.write_all(&bytes)?;
+    file.sync_all()?;
+
+    Ok(())
 }
-pub fn remove(name: &str, settings: &Settings) {
+pub fn remove(name: &str, settings: &Settings) -> io::Result<()> {
     if Path::new(name).file_name().and_then(|name| name.to_str()) != Some(name) {
         eprintln!("invalid stored file name");
-        return;
+        return Ok(());
     }
 
     let path = settings.enc_dir.join(name);
-    overwrite(&path);
-    fs::remove_file(path).unwrap();
+    overwrite(&path)?;
+    fs::remove_file(path)?;
+    Ok(())
 }
 
-pub fn check(password: &[u8], settings: &Settings) {
+pub fn check(password: &[u8], settings: &Settings) -> anyhow::Result<()> {
     let dir = &settings.enc_dir;
 
-    for item in fs::read_dir(dir).unwrap() {
-        let entry = item.unwrap();
+    for item in fs::read_dir(dir)? {
+        let entry = item?;
         let path = entry.path();
         if path.is_file() {
-            let mut file = File::open(&path).unwrap();
+            let mut file = File::open(&path)?;
 
             let mut salt = [0u8; SALT_SIZE];
             let mut nounce = [0u8; NOUNCE_SIZE];
@@ -142,23 +149,40 @@ pub fn check(password: &[u8], settings: &Settings) {
             }
 
             let mut key = Zeroizing::new([0u8; KEY_SIZE]);
-            Argon2::default().hash_password_into(password, &salt, &mut *key).unwrap();
-            let cipher = XChaCha20Poly1305::new_from_slice(&*key).unwrap();
+            Argon2::default().hash_password_into(password, &salt, &mut *key)?;
+            let cipher = XChaCha20Poly1305::new_from_slice(&*key)?;
             if cipher.decrypt(&XNonce::from(nounce), Payload { msg: &ciphertext, aad: &path_bytes }).is_err() {
                 eprintln!("failed integrity check: {:?}", path);
                 continue;
             }
 
-            println!("{:?}", path.file_name().unwrap());
+            println!("{:?}", path.file_name().context("stored path has no file name")?);
         }
     }
+    Ok(())
 }
 #[derive(Debug)]
 pub enum EncError {
     Decryption(String),
     UnZip(String),
     Read,
+    Crypto(String),
+    Io(io::Error),
 }
+
+impl std::fmt::Display for EncError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Decryption(file_name) => write!(formatter, "Decryption({file_name:?})"),
+            Self::UnZip(error) => write!(formatter, "UnZip({error:?})"),
+            Self::Read => write!(formatter, "Read"),
+            Self::Crypto(error) => write!(formatter, "Crypto({error:?})"),
+            Self::Io(error) => write!(formatter, "Io({error:?})"),
+        }
+    }
+}
+
+impl std::error::Error for EncError {}
 
 pub fn move_out(password: &[u8], settins: &Settings, name: &str) -> Result<(), EncError> {
     if Path::new(name).file_name().and_then(|name| name.to_str()) != Some(name) {
@@ -186,17 +210,16 @@ pub fn move_out(password: &[u8], settins: &Settings, name: &str) -> Result<(), E
     file.read_to_end(&mut cypehr).map_err(|_| EncError::Read)?;
 
     let mut key = Zeroizing::new([0u8; KEY_SIZE]);
-    Argon2::default().hash_password_into(password, &salt, &mut *key).unwrap();
+    Argon2::default().hash_password_into(password, &salt, &mut *key).map_err(|error| EncError::Crypto(error.to_string()))?;
 
     let path = String::from_utf8(path).map_err(|_| EncError::Read)?;
 
     // will be used for the file name
     let path_to_name = PathBuf::from(path.clone());
 
-    let cipher = XChaCha20Poly1305::new_from_slice(&*key).unwrap();
-    let decrypted = cipher
-        .decrypt(&XNonce::from(nounce), Payload { msg: &cypehr, aad: path.as_bytes() })
-        .map_err(|_| EncError::Decryption(path_to_name.file_name().unwrap().to_str().unwrap().to_owned()))?;
+    let cipher = XChaCha20Poly1305::new_from_slice(&*key).map_err(|error| EncError::Crypto(error.to_string()))?;
+    let file_name = path_to_name.file_name().and_then(|name| name.to_str()).ok_or(EncError::Read)?.to_owned();
+    let decrypted = cipher.decrypt(&XNonce::from(nounce), Payload { msg: &cypehr, aad: path.as_bytes() }).map_err(|_| EncError::Decryption(file_name))?;
 
     let decomp = zstd::decode_all(Cursor::new(decrypted)).map_err(|error| EncError::UnZip(error.to_string()))?;
     let temporary = PathBuf::from(&path).with_extension("secure_safe.tmp");
@@ -204,7 +227,7 @@ pub fn move_out(password: &[u8], settins: &Settings, name: &str) -> Result<(), E
     file.write_all(&decomp).map_err(|_| EncError::Read)?;
     fs::rename(temporary, path).map_err(|_| EncError::Read)?;
 
-    remove(name, settins);
+    remove(name, settins).map_err(EncError::Io)?;
     Ok(())
 }
 
@@ -212,24 +235,27 @@ pub fn move_out(password: &[u8], settins: &Settings, name: &str) -> Result<(), E
 mod tests {
     use std::fs;
 
+    use anyhow::Context;
+
     use super::{Safe, move_out};
     use crate::settings::Settings;
 
     #[test]
-    fn stores_and_restores_binary_files() {
+    fn stores_and_restores_binary_files() -> anyhow::Result<()> {
         let dir = std::env::temp_dir().join(format!("secure_safe-{}", std::process::id()));
         let source = dir.join("source.bin");
         let settings = Settings { enc_dir: dir.join("vault") };
         let contents = [0, 159, 146, 150, 255];
 
-        fs::create_dir_all(&settings.enc_dir).unwrap();
-        fs::write(&source, contents).unwrap();
+        fs::create_dir_all(&settings.enc_dir)?;
+        fs::write(&source, contents)?;
 
-        Safe::new(source.to_str().unwrap(), b"password").store(&settings);
-        fs::remove_file(&source).unwrap();
-        move_out(b"password", &settings, "source.bin").unwrap();
+        Safe::new(source.to_str().context("source path is not valid UTF-8")?, b"password")?.store(&settings)?;
+        fs::remove_file(&source)?;
+        move_out(b"password", &settings, "source.bin")?;
 
-        assert_eq!(fs::read(&source).unwrap(), contents);
-        fs::remove_dir_all(dir).unwrap();
+        assert_eq!(fs::read(&source)?, contents);
+        fs::remove_dir_all(dir)?;
+        Ok(())
     }
 }

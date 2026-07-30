@@ -1,5 +1,6 @@
-use std::{env::args, fs, io, process::exit};
+use std::{env::args, fs, io, path::PathBuf, process::exit};
 
+use anyhow::Context;
 use owo_colors::OwoColorize;
 use zeroize::Zeroizing;
 
@@ -19,36 +20,38 @@ const COMMAND_INDEX: usize = 1;
 const PATH_INDEX: usize = 2;
 const HELP_COLUMN_WIDTH: usize = 18;
 
-fn main() {
+fn main() -> anyhow::Result<()> {
     let args = parse();
 
-    let settings = Settings::load();
+    let settings = Settings::load()?;
     let args = resolve_path(args, &settings);
 
     match args {
         ResolvedFlags::Add(name) => {
-            let password = ask_password();
-            let new = Safe::new(&name, password.as_bytes());
-            new.store(&settings);
+            let password = ask_password()?;
+            let new = Safe::new(&name, password.as_bytes())?;
+            new.store(&settings)?;
             delete_file(&name);
+            println!("{} was successfully saved", PathBuf::from(name).file_name().context("path has no file name")?.display());
         },
         ResolvedFlags::Remove(name) => {
             let mut answer = String::new();
             println!("are you sure you want to remove {} permanently? y/n", name);
-            io::stdin().read_line(&mut answer).unwrap();
+            io::stdin().read_line(&mut answer)?;
 
             if answer.trim() == "y" {
-                remove(&name, &settings);
+                remove(&name, &settings)?;
             } else {
                 println!("file {} not deleted", name);
             }
+            println!("{} was successfully removed", PathBuf::from(name).file_name().context("path has no file name")?.display());
         },
         ResolvedFlags::Check => {
-            let password = ask_password();
-            check(password.as_bytes(), &settings);
+            let password = ask_password()?;
+            check(password.as_bytes(), &settings)?;
         },
         ResolvedFlags::MoveOut(name) => {
-            let mut password = ask_password();
+            let mut password = ask_password()?;
             loop {
                 match move_out(password.as_bytes(), &settings, &name) {
                     Ok(_) => break,
@@ -58,17 +61,19 @@ fn main() {
                     },
                     Err(EncError::Decryption(file_name)) => {
                         eprintln!("error decrypting {}", file_name);
-                        password = ask_password();
+                        password = ask_password()?;
                         // try again with new password
                     },
                     Err(EncError::Read) => {
                         eprintln!("error reading file try again later");
                         exit(EXIT_SUCCESS);
                     },
+                    Err(error) => return Err(error.into()),
                 };
             }
         },
     }
+    Ok(())
 }
 
 enum Flags {
@@ -117,15 +122,9 @@ fn explorer_path(result: io::Result<std::path::PathBuf>) -> String {
         })
 }
 
-fn ask_password() -> Zeroizing<String> {
+fn ask_password() -> io::Result<Zeroizing<String>> {
     loop {
-        let password = match rpassword::prompt_password(obfstr::obfstr!("Password: ")) {
-            Ok(password) => Zeroizing::new(password),
-            Err(_) => {
-                eprintln!("impossible to read password");
-                panic!();
-            },
-        };
+        let password = Zeroizing::new(rpassword::prompt_password(obfstr::obfstr!("Password: "))?);
 
         println!(
             "{}",
@@ -135,7 +134,15 @@ fn ask_password() -> Zeroizing<String> {
         if password.is_empty() {
             println!("{}", obfstr::obfstr!("choose a password"));
         } else {
-            return password;
+            let sec_password = Zeroizing::new(rpassword::prompt_password(obfstr::obfstr!("Confirm Password: "))?);
+
+            if password != sec_password {
+                println!("{}", obfstr::obfstr!("passwords are diffrent, input again"));
+                continue;
+            }
+            if password == sec_password {
+                return Ok(password);
+            }
         }
     }
 }
@@ -195,7 +202,7 @@ fn parse() -> Flags {
         help();
     });
 
-    if arg == "--help" || arg == "help" || arg == "-h" || arg == "--h"{
+    if arg == "--help" || arg == "help" || arg == "-h" || arg == "--h" {
         help();
     } else if arg == "--check" || arg == "check" {
         Flags::Check
