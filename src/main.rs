@@ -1,16 +1,17 @@
-use std::{env::args, fs, io, path::Path, process::exit};
+use std::{env::args, fs, io, process::exit};
 
 use owo_colors::OwoColorize;
 use zeroize::Zeroizing;
 
 use crate::{
+    navigation::file_explorer::enable_file_explorer,
     safe::{EncError, Safe, check, move_out, remove},
     settings::Settings,
 };
 
+mod navigation;
 mod safe;
 mod settings;
-mod navigation;
 
 const EXIT_SUCCESS: i32 = 0;
 const EXIT_FAILURE: i32 = 1;
@@ -159,9 +160,9 @@ fn parse() -> Flags {
     } else if arg == "--check" || arg == "check" {
         Flags::Check
     } else {
-        let Some(path) = args.get(PATH_INDEX) else {
-            println!("missing path or name in arguments");
-            exit(EXIT_FAILURE);
+        let path = match args.get(PATH_INDEX) {
+            Some(path) => path,
+            None => &enable_file_explorer().unwrap().into_string().unwrap(),
         };
 
         if arg == "--add" || arg == "add" {

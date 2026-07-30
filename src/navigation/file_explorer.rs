@@ -1,113 +1,198 @@
-use std::{env::home_dir, fs, io::stdout, path::PathBuf};
+use std::{
+    env::home_dir,
+    fs,
+    io::{self, stdout, Write},
+    path::{Path, PathBuf},
+    process::exit,
+};
 
 use crossterm::{
-    event::{Event, KeyCode},
-    execute, terminal,
-    terminal::{Clear, ClearType, enable_raw_mode},
+    cursor::MoveTo,
+    event::{Event, KeyCode, KeyEventKind},
+    execute, queue,
+    style::{Attribute, Color, Print, ResetColor, SetAttribute, SetForegroundColor},
+    terminal::{self, disable_raw_mode, enable_raw_mode, Clear, ClearType},
 };
-use owo_colors::OwoColorize;
 
-use crate::io;
+struct RawModeGuard;
 
-#[derive(Default)]
-struct SelectionCursor {
-    selected_row: u8,
-    selected_column: u8,
+impl Drop for RawModeGuard {
+    fn drop(&mut self) {
+        let _ = disable_raw_mode();
+    }
 }
 
 struct ExplorerViewport {
-    terminal_rows: u8,
-    terminal_columns: u8,
-    selection_cursor: SelectionCursor,
+    rows: u16,
+    columns: u16,
+    selected: usize,
+    scroll_offset: usize,
 }
 
-fn read_directory(directory_path: PathBuf) -> io::Result<Vec<PathBuf>> {
-    let mut entry_paths = Vec::with_capacity(3);
-
-    for directory_entry in fs::read_dir(directory_path).unwrap() {
-        let directory_entry = directory_entry.unwrap();
-        let entry_path = directory_entry.path();
-
-        entry_paths.push(entry_path);
+impl ExplorerViewport {
+    fn new(columns: u16, rows: u16) -> Self {
+        Self { rows, columns, selected: 0, scroll_offset: 0 }
     }
 
+    fn visible_entry_count(&self) -> usize {
+        // One row for the current path and one for the key hints.
+        self.rows.saturating_sub(2) as usize
+    }
+
+    fn keep_selection_visible(&mut self) {
+        let visible = self.visible_entry_count();
+        if visible == 0 || self.selected < self.scroll_offset {
+            self.scroll_offset = self.selected;
+        } else if self.selected >= self.scroll_offset + visible {
+            self.scroll_offset = self.selected + 1 - visible;
+        }
+    }
+
+    fn reset_selection(&mut self) {
+        self.selected = 0;
+        self.scroll_offset = 0;
+    }
+}
+
+fn read_directory(directory_path: &Path) -> io::Result<Vec<PathBuf>> {
+    let mut entry_paths = fs::read_dir(directory_path)?.filter_map(|entry| entry.ok().map(|entry| entry.path())).filter(|path| path.is_file() || path.is_dir()).collect::<Vec<_>>();
+
+    // A stable order makes the cursor predictable between redraws. Directories
+    // are grouped first, like most graphical file explorers.
+    entry_paths.sort_by(|left, right| right.is_dir().cmp(&left.is_dir()).then_with(|| left.file_name().cmp(&right.file_name())));
+
     Ok(entry_paths)
 }
 
-fn display_directory(directory_path: PathBuf) -> io::Result<Vec<PathBuf>> {
-    let entry_paths = read_directory(directory_path)?;
+fn clipped(text: &str, width: usize) -> String {
+    text.chars().take(width).collect()
+}
 
-    entry_paths.iter().for_each(|entry_path| {
-        if entry_path.is_dir() {
-            println!("{}", entry_path.file_name().unwrap().display().green());
+fn display_directory(output: &mut impl Write, directory_path: &Path, entry_paths: &[PathBuf], viewport: &ExplorerViewport) -> io::Result<()> {
+    queue!(output, MoveTo(0, 0), Clear(ClearType::All))?;
+
+    let width = viewport.columns as usize;
+    queue!(output, SetForegroundColor(Color::Yellow), Print(clipped(&directory_path.display().to_string(), width)), ResetColor)?;
+
+    let visible = viewport.visible_entry_count();
+    for (screen_row, (entry_index, entry_path)) in entry_paths.iter().enumerate().skip(viewport.scroll_offset).take(visible).enumerate() {
+        let is_selected = entry_index == viewport.selected;
+        let is_directory = entry_path.is_dir();
+        let mut name = entry_path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_else(|| entry_path.display().to_string());
+        if is_directory {
+            name.push('/');
         }
-        if entry_path.is_file() {
-            println!("{}", entry_path.file_name().unwrap().display().black())
+
+        let prefix = if is_selected { "> " } else { "  " };
+        let line = clipped(&format!("{prefix}{name}"), width);
+        queue!(output, MoveTo(0, screen_row as u16 + 1))?;
+        if is_selected {
+            queue!(output, SetAttribute(Attribute::Reverse))?;
         }
-    });
+        queue!(output, SetForegroundColor(if is_directory { Color::Cyan } else { Color::White }), Print(line), ResetColor)?;
+        if is_selected {
+            queue!(output, SetAttribute(Attribute::Reset))?;
+        }
+    }
 
-    Ok(entry_paths)
+    if viewport.rows > 1 {
+        let hint = if entry_paths.is_empty() {
+            "Empty directory  ←: parent  q: quit"
+        } else {
+            "↑/↓: select  →: open  ←: parent  Enter: choose  q: quit"
+        };
+        queue!(output, MoveTo(0, viewport.rows - 1), SetForegroundColor(Color::DarkGrey), Print(clipped(hint, width)), ResetColor)?;
+    }
+
+    output.flush()
 }
 
-fn current_entry_path<'a>(viewport: &ExplorerViewport, entry_paths: &'a [PathBuf]) -> &'a PathBuf {
-    entry_paths.get(viewport.selection_cursor.selected_row as usize).unwrap()
-}
-fn open_current_directory(viewport: &ExplorerViewport, entry_paths: &[PathBuf]) -> io::Result<Vec<PathBuf>> {
-    let current_path = current_entry_path(viewport, entry_paths);
-
-    let child_entry_paths = display_directory(current_path.clone())?;
-
-    Ok(child_entry_paths)
-}
-fn open_parent_directory(viewport: &ExplorerViewport, entry_paths: &[PathBuf]) -> Option<Vec<PathBuf>> {
-    let current_path = current_entry_path(viewport, entry_paths);
-
-    let parent_entry_paths = display_directory(PathBuf::from(current_path.parent()?));
-
-    return Some(parent_entry_paths.unwrap());
-}
 pub fn enable_file_explorer() -> io::Result<PathBuf> {
-    execute!(stdout(), Clear(ClearType::All))?;
-
+    let mut current_directory = home_dir().ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "home directory is unavailable"))?;
+    let mut entry_paths = read_directory(&current_directory)?;
     let (columns, rows) = terminal::size()?;
-    let mut viewport = ExplorerViewport {
-        terminal_columns: columns as u8,
-        terminal_rows: rows as u8,
-        selection_cursor: SelectionCursor::default(),
-    };
+    let mut viewport = ExplorerViewport::new(columns, rows);
 
     enable_raw_mode()?;
+    let raw_mode = RawModeGuard;
+    let mut output = stdout();
+    display_directory(&mut output, &current_directory, &entry_paths, &viewport)?;
 
-    let mut entry_paths = display_directory(home_dir().unwrap())?;
     loop {
-        if let Event::Key(key_event) = crossterm::event::read()? {
-            match key_event.code {
-                KeyCode::Up => {
-                    if viewport.selection_cursor.selected_row > 1 {
-                        viewport.selection_cursor.selected_column -= 1;
+        let event = crossterm::event::read()?;
+        match event {
+            Event::Resize(columns, rows) => {
+                viewport.columns = columns;
+                viewport.rows = rows;
+                viewport.keep_selection_visible();
+            },
+            Event::Key(key_event) if key_event.kind != KeyEventKind::Release => match key_event.code {
+                KeyCode::Up if viewport.selected > 0 => {
+                    viewport.selected -= 1;
+                    viewport.keep_selection_visible();
+                },
+                KeyCode::Down if viewport.selected + 1 < entry_paths.len() => {
+                    viewport.selected += 1;
+                    viewport.keep_selection_visible();
+                },
+                KeyCode::Right => {
+                    if let Some(path) = entry_paths.get(viewport.selected).filter(|path| path.is_dir()) {
+                        current_directory = path.clone();
+                        entry_paths = read_directory(&current_directory)?;
+                        viewport.reset_selection();
                     }
                 },
-                KeyCode::Down => {
-                    if viewport.selection_cursor.selected_column < viewport.terminal_rows {
-                        viewport.selection_cursor.selected_column += 1;
+                KeyCode::Left => {
+                    if let Some(parent) = current_directory.parent() {
+                        let previous_directory = current_directory.clone();
+                        current_directory = parent.to_path_buf();
+                        entry_paths = read_directory(&current_directory)?;
+                        viewport.reset_selection();
+                        if let Some(index) = entry_paths.iter().position(|path| path == &previous_directory) {
+                            viewport.selected = index;
+                            viewport.keep_selection_visible();
+                        }
                     }
                 },
-                KeyCode::Right if current_entry_path(&viewport, &entry_paths).is_dir() => {
-                    let res = open_current_directory(&viewport, &entry_paths)?;
-                    entry_paths = res;
+                KeyCode::Enter => {
+                    if let Some(path) = entry_paths.get(viewport.selected).filter(|path| path.is_file()) {
+                        execute!(output, Clear(ClearType::All), MoveTo(0, 0))?;
+                        drop(raw_mode);
+                        return Ok(path.clone());
+                    }
                 },
-
-                KeyCode::Left if current_entry_path(&viewport, &entry_paths).is_dir() => {
-                    let Some(res) = open_parent_directory(&viewport, &entry_paths) else {
-                        continue;
-                    };
-                    entry_paths = res;
+                KeyCode::Char('q') | KeyCode::Esc => {
+                    disable_raw_mode()?;
+                    execute!(output, Clear(ClearType::All), MoveTo(0, 0))?;
+                    exit(0);
                 },
-                KeyCode::Enter if current_entry_path(&viewport, &entry_paths).is_file() => {
-                    return Ok(current_entry_path(&viewport, &entry_paths).clone());
-                },
-                _ => (),
-            }
+                _ => {},
+            },
+            _ => {},
         }
+
+        display_directory(&mut output, &current_directory, &entry_paths, &viewport)?;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scrolling_keeps_the_selection_in_view() {
+        let mut viewport = ExplorerViewport::new(80, 5);
+        viewport.selected = 4;
+        viewport.keep_selection_visible();
+        assert_eq!(viewport.scroll_offset, 2);
+
+        viewport.selected = 1;
+        viewport.keep_selection_visible();
+        assert_eq!(viewport.scroll_offset, 1);
+    }
+
+    #[test]
+    fn clipping_does_not_split_unicode_characters() {
+        assert_eq!(clipped("↑/↓: select", 4), "↑/↓:");
     }
 }
