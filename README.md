@@ -5,17 +5,19 @@
     <img alt="Rust 2024" src="https://img.shields.io/badge/Rust-2024-DEA584?logo=rust&amp;logoColor=white">
     <img alt="XChaCha20-Poly1305" src="https://img.shields.io/badge/encryption-XChaCha20--Poly1305-6E56CF">
     <img alt="Argon2" src="https://img.shields.io/badge/key%20derivation-Argon2-1F8AC0">
-    <img alt="Status: unsafe pre-alpha" src="https://img.shields.io/badge/status-unsafe%20pre--alpha-D73A49">
+    <img alt="Status: experimental" src="https://img.shields.io/badge/status-experimental-D73A49">
   </p>
 </div>
 
 <hr>
 
 <blockquote>
-  <p><strong>Do not use this version with important files.</strong> The current <code>add</code> path contains a critical logic bug: after creating the encrypted vault entry, it targets that new vault entry for deletion instead of deleting the source plaintext. With a simple filename, the encrypted copy is removed and the plaintext remains. This project is not ready to protect real data.</p>
+  <p><strong>Do not use this version as the only copy of important files.</strong> The project is unaudited and pre-alpha. Writes are not yet atomic or crash-safe, and some error paths still panic.</p>
 </blockquote>
 
-<h2>Intended design</h2>
+<h2>What it does</h2>
+
+<p><code>secure_safe</code> compresses a file, encrypts it into a local vault, and removes the original. A stored file can later be authenticated, decrypted, decompressed, and restored to its original path.</p>
 
 <table>
   <tbody>
@@ -25,7 +27,7 @@
     </tr>
     <tr>
       <td>🧂 <strong>Key derivation</strong></td>
-      <td>Argon2 with a fresh random 16-byte salt per file.</td>
+      <td>Argon2 with a fresh random 16-byte salt for each file.</td>
     </tr>
     <tr>
       <td>🔒 <strong>Encryption</strong></td>
@@ -37,14 +39,26 @@
     </tr>
     <tr>
       <td>🧹 <strong>Secret handling</strong></td>
-      <td>Derived keys and entered passwords use zeroizing wrappers.</td>
+      <td>Entered passwords and derived keys use zeroizing wrappers.</td>
     </tr>
   </tbody>
 </table>
 
-<p>These primitives describe the implementation, not a security guarantee. The program has not been audited, and its current file lifecycle is unsafe.</p>
+<p>These are implementation details, not a security guarantee.</p>
 
-<h2>Current commands</h2>
+<h2>Build</h2>
+
+<p>Install a current Rust toolchain, clone the repository, and run:</p>
+
+<pre><code>cargo build --release
+./target/release/secure_safe help</code></pre>
+
+<p>For development:</p>
+
+<pre><code>cargo build
+cargo test</code></pre>
+
+<h2>Usage</h2>
 
 <pre><code>secure_safe &lt;COMMAND&gt; [PATH]</code></pre>
 
@@ -52,21 +66,21 @@
   <thead>
     <tr>
       <th align="left">Command</th>
-      <th align="left">Current behavior</th>
+      <th align="left">Behavior</th>
     </tr>
   </thead>
   <tbody>
     <tr>
       <td><code>add &lt;PATH&gt;</code></td>
-      <td>Compresses and encrypts a source file, but then incorrectly deletes or rejects the vault entry as described above. Unsafe.</td>
+      <td>Compresses and encrypts a file into the vault, then removes the source file.</td>
     </tr>
     <tr>
       <td><code>rm &lt;NAME&gt;</code></td>
-      <td>Asks for confirmation, overwrites the named vault entry with zero bytes, and removes it.</td>
+      <td>After confirmation, overwrites the named vault entry with zero bytes and removes it.</td>
     </tr>
     <tr>
       <td><code>mo &lt;NAME&gt;</code></td>
-      <td>Decrypts and decompresses the named entry to its recorded path, then removes the vault entry.</td>
+      <td>Decrypts and restores the named vault entry to its recorded path, then removes the vault entry.</td>
     </tr>
     <tr>
       <td><code>check</code></td>
@@ -79,18 +93,45 @@
   </tbody>
 </table>
 
-<p>Long forms are also parsed: <code>--add</code>, <code>--rm</code>, <code>--mo</code>, <code>--check</code>, and <code>--help</code>.</p>
+<p>Long forms are also accepted: <code>--add</code>, <code>--rm</code>, <code>--mo</code>, <code>--check</code>, and <code>--help</code>.</p>
 
-<h2>Build for development</h2>
+<h3>Examples</h3>
 
-<pre><code>cargo build
-cargo test</code></pre>
+<pre><code># Encrypt a file and remove the plaintext source
+secure_safe add ~/Documents/secret.txt
 
-<p>The optimized profile enables fat LTO and strips symbols:</p>
+# Restore it to ~/Documents/secret.txt
+secure_safe mo secret.txt
 
-<pre><code>cargo build --release</code></pre>
+# Check all vault entries with a password
+secure_safe check
 
-<h2>Storage layout</h2>
+# Permanently remove an entry without restoring it
+secure_safe rm secret.txt</code></pre>
+
+<h2>Built-in file explorer</h2>
+
+<p>Run <code>secure_safe add</code> without a path to select a source file interactively. The explorer starts in your home directory and groups directories before files.</p>
+
+<table>
+  <thead>
+    <tr>
+      <th align="left">Key</th>
+      <th align="left">Action</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td><code>↑</code> / <code>↓</code></td><td>Move the selection.</td></tr>
+    <tr><td><code>→</code></td><td>Open the selected directory.</td></tr>
+    <tr><td><code>←</code></td><td>Go to the parent directory.</td></tr>
+    <tr><td><code>Enter</code></td><td>Choose the selected file.</td></tr>
+    <tr><td><code>q</code> / <code>Esc</code></td><td>Quit.</td></tr>
+  </tbody>
+</table>
+
+<p>For <code>rm</code> and <code>mo</code>, pass the vault entry's base name explicitly.</p>
+
+<h2>Storage</h2>
 
 <p>On first use, the program creates:</p>
 
@@ -113,31 +154,34 @@ cargo test</code></pre>
   </tbody>
 </table>
 
-<p>A different vault directory can be configured with:</p>
+<p>To use a different vault directory, edit the settings file:</p>
 
 <pre><code>enc_dir = "/absolute/path/to/my-vault"</code></pre>
 
-<h2>Known safety limitations</h2>
+<h2>Known limitations</h2>
 
 <ul>
-  <li><code>add</code> currently has the critical deletion-target bug described at the top of this page.</li>
-  <li>There is no password recovery.</li>
-  <li>Overwriting a file before unlinking does not guarantee physical erasure on SSDs, copy-on-write filesystems, snapshots, journals, or remote storage.</li>
-  <li>Several I/O and parsing paths still use <code>unwrap</code>, <code>expect</code>, or <code>panic</code>; interruption can leave partial state.</li>
-  <li>Vault entries are keyed only by the source base filename, so equal filenames from different directories conflict.</li>
-  <li>The format is pre-alpha and may change without migration support.</li>
+  <li>There is no password recovery. Each file is decrypted with the password used when it was added.</li>
+  <li>Vault writes and source deletion are not atomic or explicitly synced. A crash or power loss at the wrong time can cause data loss.</li>
+  <li>Several I/O and parsing paths still use <code>unwrap</code>, <code>expect</code>, or <code>panic</code>.</li>
+  <li>Vault entries use only the source base filename, so files with the same name conflict even when they come from different directories.</li>
+  <li>Restoring can replace a file already present at the recorded path.</li>
+  <li>Overwriting before unlinking does not guarantee physical erasure on SSDs, copy-on-write filesystems, snapshots, journals, or remote storage.</li>
+  <li>The on-disk format is not versioned and may change without migration support.</li>
+  <li>The implementation has not received an independent security audit.</li>
 </ul>
 
-<h2>Before this can be trusted</h2>
+<h2>Before production use</h2>
 
 <ol>
-  <li>Fix the <code>add</code> deletion target and add regression tests proving the source and vault states.</li>
-  <li>Make writes atomic and define recovery behavior for interruption or partial failure.</li>
-  <li>Replace panic-based error handling on all file and cryptographic paths.</li>
-  <li>Document and version the on-disk format.</li>
-  <li>Obtain focused security review before claiming safe storage.</li>
+  <li>Make vault writes and source deletion durable, atomic, and recoverable.</li>
+  <li>Replace panic-based error handling across file and cryptographic operations.</li>
+  <li>Prevent accidental overwrite when restoring and define conflict behavior.</li>
+  <li>Version and document the on-disk format.</li>
+  <li>Add broader failure-path and interruption tests.</li>
+  <li>Obtain a focused independent security review.</li>
 </ol>
 
 <div align="center">
-  <sub>Pre-alpha cryptography code: inspect first, trust later.</sub>
+  <sub>Experimental cryptography code: inspect first, trust later.</sub>
 </div>
