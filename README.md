@@ -111,7 +111,7 @@ secure_safe rm secret.txt</code></pre>
 
 <h2>Built-in file explorer</h2>
 
-<p>Run <code>secure_safe add</code> without a path to select a source file interactively. The explorer starts in your home directory and groups directories before files.</p>
+<p>Run a file command without its path or name to select a file interactively. For <code>add</code>, the explorer starts in your home directory and lets you browse for a source file. For <code>rm</code> and <code>mo</code>, it shows only files in the configured vault.</p>
 
 <table>
   <thead>
@@ -129,7 +129,7 @@ secure_safe rm secret.txt</code></pre>
   </tbody>
 </table>
 
-<p>For <code>rm</code> and <code>mo</code>, pass the vault entry's base name explicitly.</p>
+<p>Directory navigation is available for <code>add</code>. The <code>rm</code> and <code>mo</code> views are intentionally limited to vault entries.</p>
 
 <h2>Storage</h2>
 
