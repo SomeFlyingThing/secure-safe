@@ -65,6 +65,8 @@ pub struct Raw {
     pub path: Vec<u8>,
 }
 
+const MARKER: &'static [u8] = b"secure-safe";
+
 pub struct Safe<State> {
     pub state: State,
 }
@@ -92,15 +94,7 @@ impl Safe<Raw> {
 
         let ciphertext = cipher.encrypt(&nounce.into(), Payload { msg: &contents, aad: path.as_bytes() }).map_err(|_| anyhow::anyhow!("encryption failed"))?;
 
-        Ok(Self {
-            state: Raw {
-                salt: salt_bytes,
-                name: name.to_str().context("file name is not valid UTF-8")?.to_owned(),
-                ciphertext,
-                path: path.as_bytes().to_vec(),
-                nounce,
-            },
-        })
+        Ok(Self { state: Raw { salt: salt_bytes, name: name.to_str().context("file name is not valid UTF-8")?.to_owned(), ciphertext, path: path.as_bytes().to_vec(), nounce } })
     }
 }
 
@@ -114,6 +108,7 @@ impl Safe<Raw> {
         let temporary = TemporaryFile { path: temporary_path(&path)? };
         let mut file = OpenOptions::new().mode(0o600).create_new(true).write(true).open(&temporary.path)?;
 
+        file.write_all(MARKER)?;
         file.write_all(&self.state.salt)?;
         file.write_all(&self.state.nounce)?;
         file.write_all(&(self.state.path.len() as u32).to_le_bytes())?;
@@ -166,9 +161,17 @@ pub fn check(password: &[u8], settings: &Settings) -> anyhow::Result<()> {
         if path.is_file() {
             let mut file = File::open(&path)?;
 
+            let mut marker = [0u8; MARKER.len()];
             let mut salt = [0u8; SALT_SIZE];
             let mut nounce = [0u8; NOUNCE_SIZE];
             let mut path_size = [0u8; PATH_SIZE_BYTES];
+
+            file.read_exact(&mut marker)?;
+
+            if marker != MARKER {
+                handle_unkown_file(&path)?;
+            }
+
             if file.read_exact(&mut salt).is_err() || file.read_exact(&mut nounce).is_err() || file.read_exact(&mut path_size).is_err() {
                 eprintln!("invalid stored file: {:?}", path);
                 continue;
@@ -182,6 +185,7 @@ pub fn check(password: &[u8], settings: &Settings) -> anyhow::Result<()> {
 
             let mut path_bytes = vec![0; path_size];
             let mut ciphertext = Vec::new();
+
             if file.read_exact(&mut path_bytes).is_err() || file.read_to_end(&mut ciphertext).is_err() {
                 eprintln!("invalid stored file: {:?}", path);
                 continue;
@@ -200,6 +204,22 @@ pub fn check(password: &[u8], settings: &Settings) -> anyhow::Result<()> {
     }
     Ok(())
 }
+
+fn handle_unkown_file(file: &Path) -> io::Result<()> {
+    println!("detected unkown file in special directory");
+    println!("moving to parent dir");
+    move_to_parent(file)?;
+
+    Ok(())
+}
+
+fn move_to_parent(file: &Path) -> io::Result<()> {
+    let destini = Path::new("..").join(file.file_name().unwrap());
+    fs::rename(file, destini)?;
+
+    Ok(())
+}
+
 #[derive(Debug)]
 pub enum EncError {
     Decryption(String),
@@ -230,10 +250,17 @@ pub fn move_out(password: &[u8], settins: &Settings, name: &str) -> Result<(), E
 
     let mut file = File::open(settins.enc_dir.join(name)).map_err(|_| EncError::Read)?;
 
+    let mut marker = [0u8; MARKER.len()];
+
     let mut salt = [0u8; SALT_SIZE];
     let mut nounce = [0u8; NOUNCE_SIZE];
     let mut path_size = [0u8; PATH_SIZE_BYTES];
     let mut cypehr = Vec::new();
+
+    file.read_exact(&mut marker).map_err(|_| EncError::Read)?;
+    if marker != MARKER {
+        handle_unkown_file(Path::new(name)).map_err(|_| EncError::Read)?;
+    }
     file.read_exact(&mut salt).map_err(|_| EncError::Read)?;
     file.read_exact(&mut nounce).map_err(|_| EncError::Read)?;
     file.read_exact(&mut path_size).map_err(|_| EncError::Read)?;
