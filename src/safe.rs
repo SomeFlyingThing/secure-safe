@@ -65,7 +65,7 @@ pub struct Raw {
     pub path: Vec<u8>,
 }
 
-const MARKER: &'static [u8] = b"secure-safe";
+const MARKER: &[u8] = b"secure-safe";
 
 pub struct Safe<State> {
     pub state: State,

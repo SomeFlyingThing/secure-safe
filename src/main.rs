@@ -10,7 +10,6 @@ use crate::{
     settings::Settings,
 };
 
-mod drive;
 mod navigation;
 mod safe;
 mod settings;

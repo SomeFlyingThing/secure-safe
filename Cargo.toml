@@ -8,8 +8,6 @@ anyhow = "1.0.104"
 argon2 = { version = "0.5.3", features = ["std"] }
 chacha20poly1305 = "0.11.0"
 crossterm = "0.29.0"
-google-drive3 = "7.0.0"
-mime = "0.3.17"
 obfstr = "0.4.6"
 owo-colors = "4.3.0"
 
