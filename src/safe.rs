@@ -85,16 +85,28 @@ impl Safe<Raw> {
         let mut key = Zeroizing::new([0u8; KEY_SIZE]);
         let mut salt_bytes = [0u8; SALT_SIZE];
         salt.as_salt().decode_b64(&mut salt_bytes)?;
-        Argon2::default().hash_password_into(password, &salt_bytes, &mut *key).context(obfstr::obfstr!("error deriving password").to_owned())?;
+        Argon2::default()
+            .hash_password_into(password, &salt_bytes, &mut *key)
+            .context(obfstr::obfstr!("error deriving password").to_owned())?;
 
         let cipher = XChaCha20Poly1305::new_from_slice(&*key)?;
 
         let mut nounce = [0u8; NOUNCE_SIZE];
         OsRng.fill_bytes(&mut nounce);
 
-        let ciphertext = cipher.encrypt(&nounce.into(), Payload { msg: &contents, aad: path.as_bytes() }).map_err(|_| anyhow::anyhow!("encryption failed"))?;
+        let ciphertext = cipher
+            .encrypt(&nounce.into(), Payload { msg: &contents, aad: path.as_bytes() })
+            .map_err(|_| anyhow::anyhow!("encryption failed"))?;
 
-        Ok(Self { state: Raw { salt: salt_bytes, name: name.to_str().context("file name is not valid UTF-8")?.to_owned(), ciphertext, path: path.as_bytes().to_vec(), nounce } })
+        Ok(Self {
+            state: Raw {
+                salt: salt_bytes,
+                name: name.to_str().context("file name is not valid UTF-8")?.to_owned(),
+                ciphertext,
+                path: path.as_bytes().to_vec(),
+                nounce,
+            },
+        })
     }
 }
 
@@ -285,7 +297,9 @@ pub fn move_out(password: &[u8], settins: &Settings, name: &str) -> Result<(), E
 
     let cipher = XChaCha20Poly1305::new_from_slice(&*key).map_err(|error| EncError::Crypto(error.to_string()))?;
     let file_name = path_to_name.file_name().and_then(|name| name.to_str()).ok_or(EncError::Read)?.to_owned();
-    let decrypted = cipher.decrypt(&XNonce::from(nounce), Payload { msg: &cypehr, aad: path.as_bytes() }).map_err(|_| EncError::Decryption(file_name))?;
+    let decrypted = cipher
+        .decrypt(&XNonce::from(nounce), Payload { msg: &cypehr, aad: path.as_bytes() })
+        .map_err(|_| EncError::Decryption(file_name))?;
 
     let decomp = zstd::decode_all(Cursor::new(decrypted)).map_err(|error| EncError::UnZip(error.to_string()))?;
     let temporary = PathBuf::from(&path).with_extension("secure_safe.tmp");

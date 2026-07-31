@@ -31,7 +31,12 @@ struct ExplorerViewport {
 
 impl ExplorerViewport {
     fn new(columns: u16, rows: u16) -> Self {
-        Self { rows, columns, selected: 0, scroll_offset: 0 }
+        Self {
+            rows,
+            columns,
+            selected: 0,
+            scroll_offset: 0,
+        }
     }
 
     fn visible_entry_count(&self) -> usize {
@@ -55,7 +60,10 @@ impl ExplorerViewport {
 }
 
 fn read_directory(directory_path: &Path) -> io::Result<Vec<PathBuf>> {
-    let mut entry_paths = fs::read_dir(directory_path)?.filter_map(|entry| entry.ok().map(|entry| entry.path())).filter(|path| path.is_file() || path.is_dir()).collect::<Vec<_>>();
+    let mut entry_paths = fs::read_dir(directory_path)?
+        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+        .filter(|path| path.is_file() || path.is_dir())
+        .collect::<Vec<_>>();
 
     // A stable order makes the cursor predictable between redraws. Directories
     // are grouped first, like most graphical file explorers.
@@ -86,7 +94,10 @@ fn display_directory(output: &mut impl Write, directory_path: &Path, entry_paths
     for (screen_row, (entry_index, entry_path)) in entry_paths.iter().enumerate().skip(viewport.scroll_offset).take(visible).enumerate() {
         let is_selected = entry_index == viewport.selected;
         let is_directory = entry_path.is_dir();
-        let mut name = entry_path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_else(|| entry_path.display().to_string());
+        let mut name = entry_path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| entry_path.display().to_string());
         if is_directory {
             name.push('/');
         }
@@ -193,7 +204,9 @@ pub fn select_source_file() -> io::Result<PathBuf> {
 
 pub fn select_vault_entry(vault_directory: &Path) -> io::Result<PathBuf> {
     let path = enable_file_explorer(vault_directory.to_path_buf(), false)?;
-    path.file_name().map(PathBuf::from).ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "vault entry has no file name"))
+    path.file_name()
+        .map(PathBuf::from)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "vault entry has no file name"))
 }
 
 #[cfg(test)]

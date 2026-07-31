@@ -10,6 +10,7 @@ use crate::{
     settings::Settings,
 };
 
+mod drive;
 mod navigation;
 mod safe;
 mod settings;
@@ -128,7 +129,9 @@ fn ask_password() -> io::Result<Zeroizing<String>> {
 
         println!(
             "{}",
-            obfstr::obfstr!("tip: if this is your first time using this program dont wory about not having a password (we know you dont have one set) just choose one and DONT forget it, it is SUPER important in the future !!!")
+            obfstr::obfstr!(
+                "tip: if this is your first time using this program dont wory about not having a password (we know you dont have one set) just choose one and DONT forget it, it is SUPER important in the future !!!"
+            )
         );
 
         if password.is_empty() {

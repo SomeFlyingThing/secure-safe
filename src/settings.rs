@@ -38,7 +38,10 @@ impl Store for Settings {
 impl Settings {
     fn default() -> io::Result<Self> {
         Ok(Self {
-            enc_dir: settings_path()?.parent().ok_or_else(|| io::Error::new(ErrorKind::InvalidInput, "settings path has no parent"))?.join(DEFAULT_ENC_DIR),
+            enc_dir: settings_path()?
+                .parent()
+                .ok_or_else(|| io::Error::new(ErrorKind::InvalidInput, "settings path has no parent"))?
+                .join(DEFAULT_ENC_DIR),
         })
     }
 
