@@ -111,6 +111,7 @@ impl Safe<Raw> {
 }
 
 impl Safe<Raw> {
+    #[allow(clippy::cast_possible_truncation)]
     pub fn store(self, settins: &Settings) -> io::Result<()> {
         let path = settins.enc_dir.join(&self.state.name);
         if path.try_exists()? {
@@ -139,6 +140,7 @@ impl Safe<Raw> {
         Ok(())
     }
 }
+#[allow(clippy::cast_possible_truncation)]
 pub fn overwrite(path: &Path) -> io::Result<()> {
     let mut file = OpenOptions::new().write(true).read(true).open(path)?;
 
@@ -185,13 +187,13 @@ pub fn check(password: &[u8], settings: &Settings) -> anyhow::Result<()> {
             }
 
             if file.read_exact(&mut salt).is_err() || file.read_exact(&mut nounce).is_err() || file.read_exact(&mut path_size).is_err() {
-                eprintln!("invalid stored file: {:?}", path);
+                eprintln!("invalid stored file: {}", path.display());
                 continue;
             }
 
             let path_size = u32::from_le_bytes(path_size) as usize;
             if path_size > MAX_PATH_SIZE {
-                eprintln!("invalid stored file: {:?}", path);
+                eprintln!("invalid stored file: {}", path.display());
                 continue;
             }
 
@@ -199,7 +201,7 @@ pub fn check(password: &[u8], settings: &Settings) -> anyhow::Result<()> {
             let mut ciphertext = Vec::new();
 
             if file.read_exact(&mut path_bytes).is_err() || file.read_to_end(&mut ciphertext).is_err() {
-                eprintln!("invalid stored file: {:?}", path);
+                eprintln!("invalid stored file: {}", path.display());
                 continue;
             }
 
@@ -207,11 +209,11 @@ pub fn check(password: &[u8], settings: &Settings) -> anyhow::Result<()> {
             Argon2::default().hash_password_into(password, &salt, &mut *key)?;
             let cipher = XChaCha20Poly1305::new_from_slice(&*key)?;
             if cipher.decrypt(&XNonce::from(nounce), Payload { msg: &ciphertext, aad: &path_bytes }).is_err() {
-                eprintln!("failed integrity check: {:?}", path);
+                eprintln!("failed integrity check: {}", path.display());
                 continue;
             }
 
-            println!("{:?}", path.file_name().context("stored path has no file name")?);
+            println!("{}", path.file_name().context("stored path has no file name")?.display());
         }
     }
     Ok(())
@@ -226,7 +228,8 @@ fn handle_unkown_file(file: &Path) -> io::Result<()> {
 }
 
 fn move_to_parent(file: &Path) -> io::Result<()> {
-    let destini = Path::new("..").join(file.file_name().unwrap());
+    let file_name = file.file_name().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "path has no file name"))?;
+    let destini = Path::new("..").join(file_name);
     fs::rename(file, destini)?;
 
     Ok(())
@@ -323,6 +326,7 @@ mod tests {
     use crate::settings::Settings;
 
     #[test]
+    #[allow(clippy::panic_in_result_fn)]
     fn stores_and_restores_binary_files() -> anyhow::Result<()> {
         let dir = std::env::temp_dir().join(format!("secure_safe-{}", std::process::id()));
         let source = dir.join("source.bin");
@@ -343,6 +347,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::panic_in_result_fn, clippy::unwrap_used)]
     fn store_does_not_replace_an_existing_entry() -> anyhow::Result<()> {
         let dir = std::env::temp_dir().join(format!("secure-safe-collision-{}", std::process::id()));
         let source = dir.join("source.bin");

@@ -3,7 +3,6 @@ use std::{
     fs,
     io::{self, Write, stdout},
     path::{Path, PathBuf},
-    process::exit,
 };
 
 use crossterm::{
@@ -48,8 +47,8 @@ impl ExplorerViewport {
         let visible = self.visible_entry_count();
         if visible == 0 || self.selected < self.scroll_offset {
             self.scroll_offset = self.selected;
-        } else if self.selected >= self.scroll_offset + visible {
-            self.scroll_offset = self.selected + 1 - visible;
+        } else if self.selected >= self.scroll_offset.saturating_add(visible) {
+            self.scroll_offset = self.selected.saturating_add(1).saturating_sub(visible);
         }
     }
 
@@ -84,6 +83,7 @@ fn clipped(text: &str, width: usize) -> String {
     text.chars().take(width).collect()
 }
 
+#[allow(clippy::cast_possible_truncation)]
 fn display_directory(output: &mut impl Write, directory_path: &Path, entry_paths: &[PathBuf], viewport: &ExplorerViewport, allow_navigation: bool) -> io::Result<()> {
     queue!(output, MoveTo(0, 0), Clear(ClearType::All))?;
 
@@ -94,17 +94,14 @@ fn display_directory(output: &mut impl Write, directory_path: &Path, entry_paths
     for (screen_row, (entry_index, entry_path)) in entry_paths.iter().enumerate().skip(viewport.scroll_offset).take(visible).enumerate() {
         let is_selected = entry_index == viewport.selected;
         let is_directory = entry_path.is_dir();
-        let mut name = entry_path
-            .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_else(|| entry_path.display().to_string());
+        let mut name = entry_path.file_name().map_or_else(|| entry_path.display().to_string(), |name| name.to_string_lossy().into_owned());
         if is_directory {
             name.push('/');
         }
 
         let prefix = if is_selected { "> " } else { "  " };
         let line = clipped(&format!("{prefix}{name}"), width);
-        queue!(output, MoveTo(0, screen_row as u16 + 1))?;
+        queue!(output, MoveTo(0, (screen_row as u16).saturating_add(1)))?;
         if is_selected {
             queue!(output, SetAttribute(Attribute::Reverse))?;
         }
@@ -124,13 +121,19 @@ fn display_directory(output: &mut impl Write, directory_path: &Path, entry_paths
         } else {
             "↑/↓: select  Enter: choose  q: quit"
         };
-        queue!(output, MoveTo(0, viewport.rows - 1), SetForegroundColor(Color::DarkGrey), Print(clipped(hint, width)), ResetColor)?;
+        queue!(
+            output,
+            MoveTo(0, viewport.rows.saturating_sub(1)),
+            SetForegroundColor(Color::DarkGrey),
+            Print(clipped(hint, width)),
+            ResetColor
+        )?;
     }
 
     output.flush()
 }
 
-fn enable_file_explorer(mut current_directory: PathBuf, allow_navigation: bool) -> io::Result<PathBuf> {
+fn enable_file_explorer(mut current_directory: PathBuf, allow_navigation: bool) -> io::Result<Option<PathBuf>> {
     let mut entry_paths = explorer_entries(&current_directory, allow_navigation)?;
     let (columns, rows) = terminal::size()?;
     let mut viewport = ExplorerViewport::new(columns, rows);
@@ -150,16 +153,16 @@ fn enable_file_explorer(mut current_directory: PathBuf, allow_navigation: bool) 
             },
             Event::Key(key_event) if key_event.kind != KeyEventKind::Release => match key_event.code {
                 KeyCode::Up if viewport.selected > 0 => {
-                    viewport.selected -= 1;
+                    viewport.selected = viewport.selected.saturating_sub(1);
                     viewport.keep_selection_visible();
                 },
-                KeyCode::Down if viewport.selected + 1 < entry_paths.len() => {
-                    viewport.selected += 1;
+                KeyCode::Down if viewport.selected.saturating_add(1) < entry_paths.len() => {
+                    viewport.selected = viewport.selected.saturating_add(1);
                     viewport.keep_selection_visible();
                 },
                 KeyCode::Right if allow_navigation => {
                     if let Some(path) = entry_paths.get(viewport.selected).filter(|path| path.is_dir()) {
-                        current_directory = path.clone();
+                        current_directory.clone_from(path);
                         entry_paths = read_directory(&current_directory)?;
                         viewport.reset_selection();
                     }
@@ -180,13 +183,13 @@ fn enable_file_explorer(mut current_directory: PathBuf, allow_navigation: bool) 
                     if let Some(path) = entry_paths.get(viewport.selected).filter(|path| path.is_file()) {
                         execute!(output, Clear(ClearType::All), MoveTo(0, 0))?;
                         drop(raw_mode);
-                        return Ok(path.clone());
+                        return Ok(Some(path.clone()));
                     }
                 },
                 KeyCode::Char('q') | KeyCode::Esc => {
                     disable_raw_mode()?;
                     execute!(output, Clear(ClearType::All), MoveTo(0, 0))?;
-                    exit(0);
+                    return Ok(None);
                 },
                 _ => {},
             },
@@ -197,16 +200,19 @@ fn enable_file_explorer(mut current_directory: PathBuf, allow_navigation: bool) 
     }
 }
 
-pub fn select_source_file() -> io::Result<PathBuf> {
+pub fn select_source_file() -> io::Result<Option<PathBuf>> {
     let home = home_dir().ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "home directory is unavailable"))?;
     enable_file_explorer(home, true)
 }
 
-pub fn select_vault_entry(vault_directory: &Path) -> io::Result<PathBuf> {
-    let path = enable_file_explorer(vault_directory.to_path_buf(), false)?;
-    path.file_name()
-        .map(PathBuf::from)
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "vault entry has no file name"))
+pub fn select_vault_entry(vault_directory: &Path) -> io::Result<Option<PathBuf>> {
+    enable_file_explorer(vault_directory.to_path_buf(), false)?
+        .map(|path| {
+            path.file_name()
+                .map(PathBuf::from)
+                .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "vault entry has no file name"))
+        })
+        .transpose()
 }
 
 #[cfg(test)]
@@ -231,6 +237,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::panic_in_result_fn)]
     fn flat_explorer_hides_directories() -> io::Result<()> {
         let directory = std::env::temp_dir().join(format!("secure-safe-explorer-{}", std::process::id()));
         let nested = directory.join("nested");

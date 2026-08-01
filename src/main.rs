@@ -1,4 +1,4 @@
-use std::{env::args, fs, io, path::PathBuf, process::exit};
+use std::{env::args, fs, io, path::PathBuf};
 
 use anyhow::Context;
 use owo_colors::OwoColorize;
@@ -14,17 +14,19 @@ mod navigation;
 mod safe;
 mod settings;
 
-const EXIT_SUCCESS: i32 = 0;
-const EXIT_FAILURE: i32 = 1;
 const COMMAND_INDEX: usize = 1;
 const PATH_INDEX: usize = 2;
 const HELP_COLUMN_WIDTH: usize = 18;
 
 fn main() -> anyhow::Result<()> {
-    let args = parse();
+    let Some(args) = parse() else {
+        return Ok(());
+    };
 
     let settings = Settings::load()?;
-    let args = resolve_path(args, &settings);
+    let Some(args) = resolve_path(args, &settings)? else {
+        return Ok(());
+    };
 
     match args {
         ResolvedFlags::Add(name) => {
@@ -36,13 +38,13 @@ fn main() -> anyhow::Result<()> {
         },
         ResolvedFlags::Remove(name) => {
             let mut answer = String::new();
-            println!("are you sure you want to remove {} permanently? y/n", name);
+            println!("are you sure you want to remove {name} permanently? y/n");
             io::stdin().read_line(&mut answer)?;
 
             if answer.trim() == "y" {
                 remove(&name, &settings)?;
             } else {
-                println!("file {} not deleted", name);
+                println!("file {name} not deleted");
             }
             println!("{} was successfully removed", PathBuf::from(name).file_name().context("path has no file name")?.display());
         },
@@ -54,22 +56,22 @@ fn main() -> anyhow::Result<()> {
             let mut password = ask_password()?;
             loop {
                 match move_out(password.as_bytes(), &settings, &name) {
-                    Ok(_) => break,
+                    Ok(()) => break,
                     Err(EncError::UnZip(file_name)) => {
-                        eprintln!("error unziping file: {}", file_name);
+                        eprintln!("error unziping file: {file_name}");
                         break;
                     },
                     Err(EncError::Decryption(file_name)) => {
-                        eprintln!("error decrypting {}", file_name);
+                        eprintln!("error decrypting {file_name}");
                         password = ask_password()?;
                         // try again with new password
                     },
                     Err(EncError::Read) => {
                         eprintln!("error reading file try again later");
-                        exit(EXIT_SUCCESS);
+                        return Ok(());
                     },
                     Err(error) => return Err(error.into()),
-                };
+                }
             }
         },
     }
@@ -83,13 +85,16 @@ enum Flags {
     Check,
 }
 
-fn resolve_path(flag: Flags, settings: &Settings) -> ResolvedFlags {
-    match flag {
-        Flags::Add(path) => ResolvedFlags::Add(path.unwrap_or_else(|| explorer_path(select_source_file()))),
-        Flags::MoveOut(name) => ResolvedFlags::MoveOut(name.unwrap_or_else(|| explorer_path(select_vault_entry(&settings.enc_dir)))),
-        Flags::Remove(name) => ResolvedFlags::Remove(name.unwrap_or_else(|| explorer_path(select_vault_entry(&settings.enc_dir)))),
-        Flags::Check => ResolvedFlags::Check,
-    }
+fn resolve_path(flag: Flags, settings: &Settings) -> io::Result<Option<ResolvedFlags>> {
+    Ok(match flag {
+        Flags::Add(Some(path)) => Some(ResolvedFlags::Add(path)),
+        Flags::Add(None) => explorer_path(select_source_file())?.map(ResolvedFlags::Add),
+        Flags::MoveOut(Some(name)) => Some(ResolvedFlags::MoveOut(name)),
+        Flags::MoveOut(None) => explorer_path(select_vault_entry(&settings.enc_dir))?.map(ResolvedFlags::MoveOut),
+        Flags::Remove(Some(name)) => Some(ResolvedFlags::Remove(name)),
+        Flags::Remove(None) => explorer_path(select_vault_entry(&settings.enc_dir))?.map(ResolvedFlags::Remove),
+        Flags::Check => Some(ResolvedFlags::Check),
+    })
 }
 
 enum ResolvedFlags {
@@ -108,18 +113,15 @@ fn command_flag(command: &str, path: Option<String>) -> Option<Flags> {
     }
 }
 
-fn explorer_path(result: io::Result<std::path::PathBuf>) -> String {
+fn explorer_path(result: io::Result<Option<std::path::PathBuf>>) -> io::Result<Option<String>> {
     result
-        .unwrap_or_else(|error| {
-            eprintln!("could not open file explorer: {error}");
-            exit(EXIT_FAILURE);
+        .map_err(|error| io::Error::new(error.kind(), format!("could not open file explorer: {error}")))?
+        .map(|path| {
+            path.into_os_string()
+                .into_string()
+                .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "selected path is not valid UTF-8"))
         })
-        .into_os_string()
-        .into_string()
-        .unwrap_or_else(|_| {
-            eprintln!("selected path is not valid UTF-8");
-            exit(EXIT_FAILURE);
-        })
+        .transpose()
 }
 
 fn ask_password() -> io::Result<Zeroizing<String>> {
@@ -149,8 +151,8 @@ fn ask_password() -> io::Result<Zeroizing<String>> {
     }
 }
 
-fn parse() -> Flags {
-    fn help() -> ! {
+fn parse() -> Option<Flags> {
+    fn help() {
         println!(
             "\
     {}
@@ -189,32 +191,29 @@ fn parse() -> Flags {
             "help,  --help",
             "EXAMPLES".bold().cyan(),
         );
-
-        exit(EXIT_SUCCESS);
     }
     let args: Vec<String> = args().collect();
 
-    if args.is_empty() {
-        println!("no args where provided");
-        exit(EXIT_SUCCESS);
-    }
-
-    let arg = args.get(COMMAND_INDEX).unwrap_or_else(|| {
-        println!("no args provided");
+    let Some(arg) = args.get(COMMAND_INDEX) else {
+        println!("no command provided");
         help();
-    });
+        return None;
+    };
 
     if arg == "--help" || arg == "help" || arg == "-h" || arg == "--h" {
         help();
+        None
     } else if arg == "--check" || arg == "check" {
-        Flags::Check
+        Some(Flags::Check)
     } else {
         let path = args.get(PATH_INDEX).cloned();
 
-        command_flag(arg, path).unwrap_or_else(|| {
+        if let Some(flag) = command_flag(arg, path) {
+            Some(flag)
+        } else {
             println!("incorrect argument");
-            exit(EXIT_FAILURE);
-        })
+            None
+        }
     }
 }
 

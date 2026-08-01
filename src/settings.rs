@@ -3,7 +3,6 @@ use std::{
     fs::{self, File},
     io::{self, ErrorKind, Read},
     path::PathBuf,
-    process::exit,
 };
 
 use anyhow::Context;
@@ -19,7 +18,7 @@ const DEFAULT_ENC_DIR: &str = ".safe_dir";
 fn settings_path() -> io::Result<PathBuf> {
     let home = env::home_dir().ok_or_else(|| io::Error::new(ErrorKind::NotFound, "impossible to get homedir"))?;
 
-    Ok(home.join(SETTINGS_NAME).to_owned())
+    Ok(home.join(SETTINGS_NAME))
 }
 
 #[derive(Deserialize, Serialize)]
@@ -63,11 +62,10 @@ impl Settings {
         file.read_to_string(&mut contents)?;
 
         if contents.is_empty() {
-            println!("configure settings at {:?}", path);
-            exit(crate::EXIT_SUCCESS);
+            return Err(io::Error::new(ErrorKind::InvalidData, format!("configure settings at {}", path.display())).into());
         }
 
-        let settings = toml::from_str::<Settings>(&contents).context(obfstr::obfstr!("toml file might be wrongly formatted").to_owned())?;
+        let settings = toml::from_str::<Settings>(&contents).context("toml file might be wrongly formatted".to_owned())?;
         fs::create_dir_all(&settings.enc_dir)?;
         Ok(settings)
     }
