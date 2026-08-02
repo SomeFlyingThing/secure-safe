@@ -29,7 +29,7 @@ struct ExplorerViewport {
 }
 
 impl ExplorerViewport {
-    fn new(columns: u16, rows: u16) -> Self {
+    const fn new(columns: u16, rows: u16) -> Self {
         Self {
             rows,
             columns,
@@ -38,12 +38,12 @@ impl ExplorerViewport {
         }
     }
 
-    fn visible_entry_count(&self) -> usize {
+    const fn visible_entry_count(&self) -> usize {
         // One row for the current path and one for the key hints.
         self.rows.saturating_sub(2) as usize
     }
 
-    fn keep_selection_visible(&mut self) {
+    const fn keep_selection_visible(&mut self) {
         let visible = self.visible_entry_count();
         if visible == 0 || self.selected < self.scroll_offset {
             self.scroll_offset = self.selected;
@@ -52,7 +52,7 @@ impl ExplorerViewport {
         }
     }
 
-    fn reset_selection(&mut self) {
+    const fn reset_selection(&mut self) {
         self.selected = 0;
         self.scroll_offset = 0;
     }
