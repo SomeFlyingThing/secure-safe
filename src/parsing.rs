@@ -11,6 +11,7 @@ pub enum ParsedArgs {
     Restore(PathBuf),
     Delete(PathBuf),
     Add(PathBuf),
+    About,
 }
 
 ///this trait is made to be used on vectors it auto handles emptiness
@@ -53,6 +54,7 @@ pub fn parse() -> Result<ParsedArgs, ParsingError> {
         "add" => Ok(ParsedArgs::Add(PathBuf::from(full_args.get_args(2)?))),
         "delete" => Ok(ParsedArgs::Delete(PathBuf::from(full_args.get_args(2)?))),
         "restore" => Ok(ParsedArgs::Restore(PathBuf::from(full_args.get_args(2)?))),
+        "about" => Ok(ParsedArgs::About),
         _ => unreachable!(),
     }
 }

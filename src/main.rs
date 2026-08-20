@@ -19,11 +19,13 @@ use crate::{
     parsing::{ParsedArgs, parse},
 };
 
+mod about;
 mod add;
 mod encryption;
 mod file_format;
 mod login;
 mod parsing;
+
 const PATH_NAME: &str = "secure-safe";
 
 fn generate_path() -> Option<PathBuf> {
@@ -62,6 +64,7 @@ fn main() -> anyhow::Result<()> {
             let file_contents = read_file(&path)?;
             add(&password, &path, &file_contents)?;
         },
+        ParsedArgs::About => about::about(),
     }
     Ok(())
 }
