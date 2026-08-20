@@ -8,7 +8,7 @@ pub enum ParsingError {
 }
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
 pub enum ParsedArgs {
-    Restore(PathBuf),
+    Restore(String),
     Delete(PathBuf),
     Add(PathBuf),
     About,
@@ -53,7 +53,7 @@ pub fn parse() -> Result<ParsedArgs, ParsingError> {
     match args.as_str() {
         "add" => Ok(ParsedArgs::Add(PathBuf::from(full_args.get_args(2)?))),
         "delete" => Ok(ParsedArgs::Delete(PathBuf::from(full_args.get_args(2)?))),
-        "restore" => Ok(ParsedArgs::Restore(PathBuf::from(full_args.get_args(2)?))),
+        "restore" => Ok(ParsedArgs::Restore(full_args.get_args(2)?)),
         "about" => Ok(ParsedArgs::About),
         _ => unreachable!(),
     }

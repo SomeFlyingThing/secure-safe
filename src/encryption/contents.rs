@@ -1,15 +1,16 @@
 ///the file format is HEADER then NOUNCE and CONTENTS
 use std::{
-    fs::File,
-    io::{self, Read},
-    marker::PhantomData,
-    path::Path,
+    fs::File, io::{self, Read, Seek}, marker::PhantomData, path::Path,
 };
 
 use chacha20poly1305::{ChaCha20Poly1305, KeyInit, Nonce, aead::Aead};
 use rand_core::{OsRng, RngCore};
+use zeroize::Zeroize;
 
-use crate::encryption::password::{Derived, Password};
+use crate::{
+    encryption::password::{Derived, Password},
+    file_format::header::Red,
+};
 
 const PASSWORD_LEN: usize = 32;
 const NOUNCE_SIZE: usize = 12;
@@ -25,8 +26,22 @@ pub struct Safe<'a, State> {
     _data: PhantomData<State>,
 }
 
+impl<'a> Safe<'a, Red>{
+    fn load(pass: &Password<Derived>,contents_path: &Path, file_ptr_location:usize)->io::Result<()>{
+        let mut file  = File::open(contents_path)?;
+
+        let mut contents = Vec::new();
+        file.seek(io::SeekFrom::Start(file_ptr_location))?;
+       file.read_to_end(&mut contents)?;
+      
+      //TODO  
+   Ok(())
+    }
+    
+}
+
 impl<'a> Safe<'a, Raw> {
-    pub  const fn new(password: &'a Password<Derived>, contents: Vec<u8>) -> Self {
+    pub const fn new(password: &'a Password<Derived>, contents: Vec<u8>) -> Self {
         Self {
             password,
             contents: Some(contents),
@@ -62,7 +77,6 @@ impl<'a> Safe<'a, Raw> {
             _data: PhantomData,
         })
     }
-    
 }
 
 fn read_file(path: &Path) -> io::Result<Vec<u8>> {
@@ -75,13 +89,13 @@ fn read_file(path: &Path) -> io::Result<Vec<u8>> {
     Ok(contents)
 }
 impl<'a> Safe<'a, Encrypted> {
-pub     fn save(&self, vec: &mut Vec<u8>) -> io::Result<()> {
+    pub fn save(&self, vec: &mut Vec<u8>) -> io::Result<()> {
         vec.extend_from_slice(&self.nonce.ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid data"))?);
         vec.extend_from_slice(&self.contents.clone().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid data"))?);
 
         Ok(())
     }
-    pub fn extract(&self)-> Vec<u8>{
+    pub fn extract(&self) -> Vec<u8> {
         self.contents.clone().unwrap()
     }
 }

@@ -25,6 +25,7 @@ mod encryption;
 mod file_format;
 mod login;
 mod parsing;
+mod restore;
 
 const PATH_NAME: &str = "secure-safe";
 
@@ -46,10 +47,7 @@ fn main() -> anyhow::Result<()> {
 
     match args {
         ParsedArgs::Restore(path) => {
-            if !path.starts_with(basep) {
-                eprintln!("invalid path");
-                return Err(io::Error::new(io::ErrorKind::InvalidFilename, "invalid path").into());
-            }
+            
             todo!()
         },
 

@@ -1,10 +1,12 @@
 use std::{
     fs::{self, File},
-    io::{self, Write},
+    io::{self, Read, Seek, Write},
     marker::PhantomData,
     ops::Deref,
-    path::Path,
+    path::{Path, PathBuf},
 };
+
+use crate::{encryption::contents, read_file};
 
 const MARKER: &str = "secure_safe";
 
@@ -13,6 +15,14 @@ pub trait Save {
     fn save(self) -> io::Result<Vec<u8>>;
 }
 
+pub trait Load {
+    fn load(path: &Path) -> io::Result<(Self, usize)>
+    where
+        Self: Sized;
+}
+
+#[cfg_attr(test, derive(PartialEq, Eq))]
+pub struct Red;
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub struct Unconfigured;
 
@@ -75,8 +85,8 @@ impl Save for Header<Configured> {
         let mut contents = Vec::new();
         contents.extend_from_slice(self.marker.as_bytes());
 
-        contents.extend_from_slice(self.path.unwrap().as_bytes());
         contents.extend_from_slice(&self.path_len.unwrap().to_be_bytes());
+        contents.extend_from_slice(self.path.unwrap().as_bytes());
         contents.extend_from_slice(&self.hash.unwrap());
 
         Ok(contents)
@@ -104,6 +114,59 @@ pub fn atomic_write(contents: &[u8], path: &Path) -> io::Result<()> {
     fs::rename(tmp, path)?;
 
     Ok(())
+}
+
+//from verb 'read'
+impl Load for Header<Red> {
+    fn load(path: &Path) -> io::Result<(Self, usize)>
+    where
+        Self: Sized,
+    {
+        let mut file = File::open(path)?;
+
+        let mut marker = [0u8; MARKER.len()];
+        //a u64 is 8 bytes long
+        let mut path_len = [0u8; 8];
+
+        file.read_exact(&mut marker)?;
+
+        if marker != MARKER.as_bytes() {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "marker doesnt correspond to file  marker"));
+        }
+
+        file.read_exact(&mut path_len)?;
+
+        //get the path
+        let path_len = u64::from_be_bytes(path_len);
+        let mut path = Vec::with_capacity(path_len as usize);
+        file.read_exact(&mut path)?;
+
+        let path = String::from_utf8(path).expect("path isnt valid utf8");
+
+        let mut hash = [0u8; 32];
+
+        file.read_exact(&mut hash)?;
+
+        let mut rest = Vec::new();
+
+        file.read_to_end(&mut rest)?;
+        let contents_hash = blake3::hash(&rest);
+        let contents_hash = contents_hash.as_bytes();
+
+        if hash != *contents_hash {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "currupted file"));
+        }
+        Ok((
+            Self {
+                marker: MARKER,
+                path_len: Some(path_len),
+                path: Some(path),
+                hash: Some(hash),
+                _data: PhantomData,
+            },
+            file.stream_position()? as usize,
+        ))
+    }
 }
 
 #[cfg(test)]
