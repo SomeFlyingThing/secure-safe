@@ -1,0 +1,87 @@
+///the file format is HEADER then NOUNCE and CONTENTS
+use std::{
+    fs::File,
+    io::{self, Read},
+    marker::PhantomData,
+    path::Path,
+};
+
+use chacha20poly1305::{ChaCha20Poly1305, KeyInit, Nonce, aead::Aead};
+use rand_core::{OsRng, RngCore};
+
+use crate::encryption::password::{Derived, Password};
+
+const PASSWORD_LEN: usize = 32;
+const NOUNCE_SIZE: usize = 12;
+pub const SALT_PATH: &str = "salt.tmp";
+
+pub struct Raw;
+pub struct Encrypted;
+
+pub struct Safe<'a, State> {
+    password: &'a Password<Derived>,
+    contents: Option<Vec<u8>>,
+    nonce: Option<[u8; NOUNCE_SIZE]>,
+    _data: PhantomData<State>,
+}
+
+impl<'a> Safe<'a, Raw> {
+    pub  const fn new(password: &'a Password<Derived>, contents: Vec<u8>) -> Self {
+        Self {
+            password,
+            contents: Some(contents),
+            nonce: None,
+            _data: PhantomData,
+        }
+    }
+    pub fn configure(self, contents: Vec<u8>) -> Safe<'a, Encrypted> {
+        Safe::<Encrypted> {
+            password: self.password,
+            contents: Some(contents),
+            nonce: None,
+            _data: PhantomData,
+        }
+    }
+    pub fn encrypt(&self) -> io::Result<Safe<Encrypted>> {
+        let cipher = ChaCha20Poly1305::new_from_slice(self.password.extract()).map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "password to big"))?;
+
+        let mut nounce = [0u8; NOUNCE_SIZE];
+        OsRng.fill_bytes(&mut nounce);
+
+        let ciphertext = cipher
+            .encrypt(
+                Nonce::from_slice(&nounce),
+                self.contents.as_deref().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid data"))?,
+            )
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid data"))?;
+
+        Ok(Safe::<Encrypted> {
+            contents: Some(ciphertext),
+            nonce: Some(nounce),
+            password: self.password,
+            _data: PhantomData,
+        })
+    }
+    
+}
+
+fn read_file(path: &Path) -> io::Result<Vec<u8>> {
+    let mut file = File::open(path)?;
+    let size = file.metadata()?.len();
+
+    let mut contents = Vec::with_capacity(size as usize);
+    file.read_to_end(&mut contents)?;
+
+    Ok(contents)
+}
+impl<'a> Safe<'a, Encrypted> {
+pub     fn save(&self, vec: &mut Vec<u8>) -> io::Result<()> {
+        vec.extend_from_slice(&self.nonce.ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid data"))?);
+        vec.extend_from_slice(&self.contents.clone().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid data"))?);
+
+        Ok(())
+    }
+    pub fn extract(&self)-> Vec<u8>{
+        self.contents.clone().unwrap()
+    }
+}
