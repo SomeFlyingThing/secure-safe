@@ -4,7 +4,7 @@ use argon2::Argon2;
 use rand_core::{OsRng, RngCore};
 use zeroize::Zeroizing;
 
-use crate::{encryption::password, file_format::header::atomic_write};
+use crate::file_format::header::atomic_write;
 
 pub const SALT_PATH: &str = "salt.sf";
 const PASS_SIZE: usize = 32;
@@ -22,8 +22,6 @@ impl Password<Default> {
     pub fn new() -> io::Result<Self> {
         Password::ask_password()
     }
-
-   
 
     pub fn recover() -> io::Result<Self> {
         Password::ask_used_pass()
@@ -80,6 +78,15 @@ impl Password<Default> {
             });
         }
     }
+
+    #[cfg(any(test, kani))]
+    pub(crate) fn test_create_pass(bytes: [u8; 32]) -> Password<Default> {
+        return Password::<Default> {
+            pass: Zeroizing::new(bytes),
+            salt: None,
+            _data: PhantomData,
+        };
+    }
     pub fn derive(self) -> io::Result<Password<Derived>> {
         let mut salt = [0u8; 16];
 
@@ -96,6 +103,7 @@ impl Password<Default> {
             _data: PhantomData,
         };
 
+        #[cfg(not(test))]
         ret.save_salt()?;
 
         Ok(ret)

@@ -1,18 +1,13 @@
 use std::{
-    any,
     env::home_dir,
-    error::Error,
     fs::File,
     hint::assert_unchecked,
     io::{self, Read},
-    ops::Deref,
     os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
 };
 
-use chacha20poly1305::consts::False;
 use encryption::password::Password;
-use rpassword::Config;
 
 use crate::{
     add::add,
@@ -39,7 +34,7 @@ fn generate_path() -> Option<PathBuf> {
 }
 
 fn main() -> anyhow::Result<()> {
-    let args = parse().map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, "no args"))?;
+    let args = parse().map_err(|_error| io::Error::new(io::ErrorKind::InvalidInput, "no args"))?;
 
     let basep = generate_path().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "couldnt get homedir"))?;
 

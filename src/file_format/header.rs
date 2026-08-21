@@ -1,13 +1,11 @@
 use std::{
-    fs::{self, File, OpenOptions, Permissions},
+    fs::{self, File, OpenOptions},
     io::{self, Read, Seek, Write},
     marker::PhantomData,
-    ops::Deref,
     os::unix::fs::OpenOptionsExt,
     path::{Path, PathBuf},
 };
 
-use crate::{encryption::contents, read_file};
 
 const MARKER: &str = "secure_safe";
 
@@ -103,12 +101,16 @@ impl Header<Configured> {
         self.hash = Some(*hash_b);
     }
     pub fn file_name(&self) -> String {
-        self.path.clone().unwrap()
+        Path::new(self.path.as_deref().unwrap())
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned()
     }
 }
 pub fn atomic_write(contents: &[u8], path: &Path) -> io::Result<()> {
     let tmp = path.with_extension("tmp");
-    let mut file = OpenOptions::new().write(true).truncate(true).mode(0o600).open(&tmp)?;
+    let mut file = OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&tmp)?;
 
     file.write_all(contents)?;
 
@@ -140,7 +142,7 @@ impl Load for Header<Red> {
 
         //get the path
         let path_len = u64::from_be_bytes(path_len);
-        let mut path = Vec::with_capacity(path_len as usize);
+        let mut path = vec![0; path_len as usize];
         file.read_exact(&mut path)?;
 
         let path = String::from_utf8(path).expect("path isnt valid utf8");
@@ -148,6 +150,8 @@ impl Load for Header<Red> {
         let mut hash = [0u8; 32];
 
         file.read_exact(&mut hash)?;
+
+        let file_ptr_location = file.stream_position()? as usize;
 
         let mut rest = Vec::new();
 
@@ -166,19 +170,23 @@ impl Load for Header<Red> {
                 hash: Some(hash),
                 _data: PhantomData,
             },
-            file.stream_position()? as usize,
+            file_ptr_location,
         ))
+    }
+}
+
+impl Header<Red> {
+    pub fn path(&self) -> PathBuf {
+        PathBuf::from(self.path.as_deref().unwrap())
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::io::stdin;
-
     use tempfile::tempdir;
 
     use super::*;
-    use crate::{Password, file_format::header::Configured};
+    use crate::{ file_format::header::Configured};
 
     #[test]
     fn header() {

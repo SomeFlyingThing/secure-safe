@@ -1,4 +1,4 @@
-use std::{env::home_dir, path::Path};
+use std::env::home_dir;
 
 use crate::encryption::contents::SALT_PATH;
 

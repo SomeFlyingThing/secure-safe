@@ -6,9 +6,8 @@ use std::{
     path::Path,
 };
 
-use chacha20poly1305::{ChaCha20Poly1305, ChaChaPoly1305, Key, KeyInit, Nonce, aead::Aead};
+use chacha20poly1305::{ChaCha20Poly1305, KeyInit, Nonce, aead::Aead};
 use rand_core::{OsRng, RngCore};
-use zeroize::Zeroize;
 
 use crate::{
     encryption::password::{Derived, Password},
@@ -67,7 +66,7 @@ impl<'a> Safe<'a, Raw> {
             _data: PhantomData,
         }
     }
-    pub fn encrypt(&self) -> io::Result<Safe<Encrypted>> {
+    pub fn encrypt(&self) -> io::Result<Safe<'_, Encrypted>> {
         let cipher = ChaCha20Poly1305::new_from_slice(self.password.extract()).map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "password to big"))?;
 
         let mut nounce = [0u8; NOUNCE_SIZE];
@@ -117,5 +116,5 @@ fn decrypt(pass: &Password<Derived>, nonce: &[u8; 12], contents: &[u8]) -> io::R
     let cipher = ChaCha20Poly1305::new_from_slice(pass.extract()).map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "decryption failed"))?;
 
     let nonce = Nonce::from(*nonce);
-    Ok(cipher.decrypt(&nonce, contents).map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "decryption failed"))?)
+    cipher.decrypt(&nonce, contents).map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "decryption failed"))
 }
