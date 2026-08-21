@@ -1,8 +1,9 @@
 use std::{
-    fs::{self, File},
+    fs::{self, File, OpenOptions, Permissions},
     io::{self, Read, Seek, Write},
     marker::PhantomData,
     ops::Deref,
+    os::unix::fs::OpenOptionsExt,
     path::{Path, PathBuf},
 };
 
@@ -16,9 +17,10 @@ pub trait Save {
 }
 
 pub trait Load {
-    fn load(path: &Path) -> io::Result<(Self, usize)>
-    where
-        Self: Sized;
+    type Input: ?Sized;
+    type Output;
+
+    fn load(path: &Self::Input) -> io::Result<Self::Output>;
 }
 
 #[cfg_attr(test, derive(PartialEq, Eq))]
@@ -106,22 +108,22 @@ impl Header<Configured> {
 }
 pub fn atomic_write(contents: &[u8], path: &Path) -> io::Result<()> {
     let tmp = path.with_extension("tmp");
-    let mut file = File::open(&tmp)?;
+    let mut file = OpenOptions::new().write(true).truncate(true).mode(0o600).open(&tmp)?;
 
     file.write_all(contents)?;
-    file.sync_all()?;
 
     fs::rename(tmp, path)?;
+    file.sync_all()?;
 
     Ok(())
 }
 
 //from verb 'read'
 impl Load for Header<Red> {
-    fn load(path: &Path) -> io::Result<(Self, usize)>
-    where
-        Self: Sized,
-    {
+    type Input = Path;
+    type Output = (Self, usize);
+
+    fn load(path:& Self::Input) -> io::Result<Self::Output> {
         let mut file = File::open(path)?;
 
         let mut marker = [0u8; MARKER.len()];

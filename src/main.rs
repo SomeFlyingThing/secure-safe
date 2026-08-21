@@ -12,20 +12,25 @@ use std::{
 
 use chacha20poly1305::consts::False;
 use encryption::password::Password;
+use rpassword::Config;
 
 use crate::{
     add::add,
+    delete::confirm_intents,
     login::has_login,
     parsing::{ParsedArgs, parse},
+    settings::configs::Configs,
 };
 
 mod about;
 mod add;
+mod delete;
 mod encryption;
 mod file_format;
 mod login;
 mod parsing;
 mod restore;
+mod settings;
 
 const PATH_NAME: &str = "secure-safe";
 
@@ -45,10 +50,11 @@ fn main() -> anyhow::Result<()> {
 
     let password = password.derive()?;
 
+    //load configs
+    let configs = Configs::load()?;
     match args {
-        ParsedArgs::Restore(path) => {
-            
-            todo!()
+        ParsedArgs::Restore(name) => {
+            restore::restore(&name, &password)?;
         },
 
         ParsedArgs::Delete(path) => {
@@ -56,7 +62,7 @@ fn main() -> anyhow::Result<()> {
                 eprintln!("invalid path");
                 return Err(io::Error::new(io::ErrorKind::InvalidFilename, "invalid path").into());
             }
-            todo!()
+            confirm_intents(&configs, &path)?;
         },
         ParsedArgs::Add(path) => {
             let file_contents = read_file(&path)?;
