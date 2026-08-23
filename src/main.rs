@@ -8,6 +8,7 @@ use std::{
 };
 
 use encryption::password::Password;
+use secure_safe::file_format;
 
 use crate::{
     add::add,
@@ -21,7 +22,6 @@ mod about;
 mod add;
 mod delete;
 mod encryption;
-mod file_format;
 mod login;
 mod parsing;
 mod restore;

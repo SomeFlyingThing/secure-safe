@@ -1,13 +1,12 @@
 use std::{
     fs::{self, File, OpenOptions},
-    io::{self, Read, Seek, Write},
+    io::{self, Read, Seek, SeekFrom, Write},
     marker::PhantomData,
     os::unix::fs::OpenOptionsExt,
     path::{Path, PathBuf},
 };
 
-
-const MARKER: [u8;11] = *b"secure_safe";
+const MARKER: [u8; 11] = *b"secure_safe";
 
 pub trait Save {
     fn check_to_save(&self);
@@ -31,7 +30,7 @@ pub struct Configured;
 
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub struct Header<State> {
-    marker: &'static [u8;11],
+    marker: &'static [u8; 11],
     path: Option<String>,
     path_len: Option<u64>,
     hash: Option<[u8; 32]>,
@@ -101,11 +100,7 @@ impl Header<Configured> {
         self.hash = Some(*hash_b);
     }
     pub fn file_name(&self) -> String {
-        Path::new(self.path.as_deref().unwrap())
-            .file_name()
-            .unwrap()
-            .to_string_lossy()
-            .into_owned()
+        Path::new(self.path.as_deref().unwrap()).file_name().unwrap().to_string_lossy().into_owned()
     }
 }
 pub fn atomic_write(contents: &[u8], path: &Path) -> io::Result<()> {
@@ -120,43 +115,52 @@ pub fn atomic_write(contents: &[u8], path: &Path) -> io::Result<()> {
     Ok(())
 }
 
-//from verb 'read'
-impl Load for Header<Red> {
-    type Input = Path;
-    type Output = (Self, usize);
-
-    fn load(path:& Self::Input) -> io::Result<Self::Output> {
-        let mut file = File::open(path)?;
-
+impl Header<Red> {
+    #[cfg(feature = "fuzzing")]
+    pub fn fuzzing_load_inner(data: &[u8]) -> Result<(Header<Red>, usize), io::Error> {
+        Self::load_inner(io::Cursor::new(data))
+    }
+    fn load_inner<R: Read + Seek>(mut reader: R) -> Result<(Header<Red>, usize), io::Error> {
         let mut marker = [0u8; MARKER.len()];
         //a u64 is 8 bytes long
         let mut path_len = [0u8; 8];
 
-        file.read_exact(&mut marker)?;
+        reader.read_exact(&mut marker)?;
 
-        
         if marker != MARKER {
             return Err(io::Error::new(io::ErrorKind::InvalidData, "marker doesnt correspond to file  marker"));
         }
 
-        file.read_exact(&mut path_len)?;
+        reader.read_exact(&mut path_len)?;
 
         //get the path
         let path_len = u64::from_be_bytes(path_len);
-        let mut path = vec![0; path_len as usize];
-        file.read_exact(&mut path)?;
+        let path_start = reader.stream_position()?;
+        let input_end = reader.seek(SeekFrom::End(0))?;
+        reader.seek(SeekFrom::Start(path_start))?;
 
-        let path = String::from_utf8(path).expect("path isnt valid utf8");
+        // A valid header must still contain the 32-byte hash after the path.
+        // Validate against the actual input before converting or allocating.
+        let available_path_bytes = input_end.saturating_sub(path_start).saturating_sub(32);
+        if path_len > available_path_bytes {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "path length exceeds input"));
+        }
+
+        let path_len_usize = usize::try_from(path_len).map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "path length is too large"))?;
+        let mut path = vec![0; path_len_usize];
+        reader.read_exact(&mut path)?;
+
+        let path = String::from_utf8(path).map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "path is not valid UTF-8"))?;
 
         let mut hash = [0u8; 32];
 
-        file.read_exact(&mut hash)?;
+        reader.read_exact(&mut hash)?;
 
-        let file_ptr_location = file.stream_position()? as usize;
+        let file_ptr_location = reader.stream_position()? as usize;
 
         let mut rest = Vec::new();
 
-        file.read_to_end(&mut rest)?;
+        reader.read_to_end(&mut rest)?;
         let contents_hash = blake3::hash(&rest);
         let contents_hash = contents_hash.as_bytes();
 
@@ -175,6 +179,16 @@ impl Load for Header<Red> {
         ))
     }
 }
+//from verb 'read'
+impl Load for Header<Red> {
+    type Input = Path;
+    type Output = (Self, usize);
+
+    fn load(path: &Self::Input) -> io::Result<Self::Output> {
+        let file = File::open(path)?;
+        Self::load_inner(file)
+    }
+}
 
 impl Header<Red> {
     pub fn path(&self) -> PathBuf {
@@ -187,7 +201,7 @@ mod tests {
     use tempfile::tempdir;
 
     use super::*;
-    use crate::{ file_format::header::Configured};
+    use crate::file_format::header::Configured;
 
     #[test]
     fn header() {
@@ -207,5 +221,25 @@ mod tests {
         };
 
         assert!(header == destiny);
+    }
+
+    #[test]
+    fn rejects_path_length_larger_than_input() {
+        let mut input = MARKER.to_vec();
+        input.extend_from_slice(&u64::MAX.to_be_bytes());
+
+        let error = Header::<Red>::load_inner(io::Cursor::new(input)).err().unwrap();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn rejects_non_utf8_path() {
+        let mut input = MARKER.to_vec();
+        input.extend_from_slice(&1_u64.to_be_bytes());
+        input.push(0xff);
+        input.extend_from_slice(&[0; 32]);
+
+        let error = Header::<Red>::load_inner(io::Cursor::new(input)).err().unwrap();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
     }
 }

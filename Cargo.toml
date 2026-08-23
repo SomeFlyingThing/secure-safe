@@ -3,6 +3,14 @@ name = "secure_safe"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+fuzzing = ["dep:afl"]
+
+[[bin]]
+name = "fuzz_target"
+path = "src/bin/fuzz_target.rs"
+required-features = ["fuzzing"]
+
 [dependencies]
 anyhow = "1.0.104"
 argon2 = { version = "0.5.3", features = ["std"] }
@@ -20,6 +28,7 @@ zeroize = "1.9.0"
 zstd = "0.13.3"
 blake3 = "1.5"
 tempfile = "3.27.0"
+afl = { version = "0.18", optional = true }
 
 [profile.release]
 opt-level = 3
