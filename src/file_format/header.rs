@@ -7,7 +7,7 @@ use std::{
 };
 
 
-const MARKER: &str = "secure_safe";
+const MARKER: [u8;11] = *b"secure_safe";
 
 pub trait Save {
     fn check_to_save(&self);
@@ -31,7 +31,7 @@ pub struct Configured;
 
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub struct Header<State> {
-    marker: &'static str,
+    marker: &'static [u8;11],
     path: Option<String>,
     path_len: Option<u64>,
     hash: Option<[u8; 32]>,
@@ -41,7 +41,7 @@ pub struct Header<State> {
 impl Header<Unconfigured> {
     pub const fn default() -> Self {
         Self {
-            marker: MARKER,
+            marker: &MARKER,
             path: None,
             path_len: None,
             hash: None,
@@ -83,7 +83,7 @@ impl Save for Header<Configured> {
         self.check_to_save();
 
         let mut contents = Vec::new();
-        contents.extend_from_slice(self.marker.as_bytes());
+        contents.extend_from_slice(self.marker);
 
         contents.extend_from_slice(&self.path_len.unwrap().to_be_bytes());
         contents.extend_from_slice(self.path.unwrap().as_bytes());
@@ -134,7 +134,8 @@ impl Load for Header<Red> {
 
         file.read_exact(&mut marker)?;
 
-        if marker != MARKER.as_bytes() {
+        
+        if marker != MARKER {
             return Err(io::Error::new(io::ErrorKind::InvalidData, "marker doesnt correspond to file  marker"));
         }
 
@@ -164,7 +165,7 @@ impl Load for Header<Red> {
         }
         Ok((
             Self {
-                marker: MARKER,
+                marker: &MARKER,
                 path_len: Some(path_len),
                 path: Some(path),
                 hash: Some(hash),
@@ -198,7 +199,7 @@ mod tests {
         let header = header.configure(&file_path);
 
         let destiny = Header::<Configured> {
-            marker: MARKER,
+            marker: &MARKER,
             path: Some(file_path.to_string_lossy().to_string()),
             path_len: Some(file_path.to_string_lossy().to_string().len() as u64),
             hash: None,
