@@ -39,12 +39,15 @@ pub(crate) fn add_at(password: &Password<Derived>, path: &Path, file_contents: &
     std::fs::create_dir_all(safe_path)?;
     let save_path = safe_path.join(file_name);
 
+    atomic_write(&contents, &save_path)?;
+    if path != save_path.as_path() {
+        std::fs::remove_file(path)?;
+    }
+
     match safe_path.file_name() {
         Some(name) => println!("file {} was succesfully saved", name.display()),
         None => println!("file was succesfully saved"),
     }
-
-    atomic_write(&contents, &save_path)?;
 
     Ok(())
 }

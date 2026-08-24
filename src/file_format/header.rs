@@ -108,9 +108,12 @@ pub fn atomic_write(contents: &[u8], path: &Path) -> io::Result<()> {
     let mut file = OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&tmp)?;
 
     file.write_all(contents)?;
+    file.sync_all()?;
 
     fs::rename(tmp, path)?;
-    file.sync_all()?;
+    if let Some(parent) = path.parent() {
+        File::open(parent)?.sync_all()?;
+    }
 
     Ok(())
 }

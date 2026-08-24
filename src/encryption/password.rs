@@ -1,4 +1,4 @@
-use std::{io, marker::PhantomData, ops::Deref};
+use std::{env::home_dir, fs, io, marker::PhantomData, ops::Deref};
 
 use argon2::Argon2;
 use rand_core::{OsRng, RngCore};
@@ -18,6 +18,19 @@ pub struct Password<State> {
     _data: PhantomData<State>,
 }
 
+fn pad_password(password: &str) -> io::Result<[u8; PASS_SIZE]> {
+    if password.is_empty() {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "password cannot be empty"));
+    }
+    if password.len() > PASS_SIZE {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "password is longer than 32 bytes"));
+    }
+
+    let mut bytes = [0u8; PASS_SIZE];
+    bytes[..password.len()].copy_from_slice(password.as_bytes());
+    Ok(bytes)
+}
+
 impl Password<Default> {
     pub fn new() -> io::Result<Self> {
         Password::ask_password()
@@ -28,52 +41,35 @@ impl Password<Default> {
     }
 
     fn ask_used_pass() -> io::Result<Self> {
-        loop {
-            println!("password:");
+        let saltloc = home_dir().ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "home dir not found"))?.join(SALT_PATH);
+        let salt: [u8; 16] = fs::read(saltloc)?
+            .try_into()
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid salt"))?;
 
-            let mut password = Zeroizing::new(String::new());
-            println!("password:");
-
-            io::stdin().read_line(&mut password)?;
-            if password.len() > PASS_SIZE {
-                println!("choose a smaller password");
-                continue;
-            }
-
-            let password = password.trim_matches(&['\r', '\n'][..]);
-            let bytes: [u8; PASS_SIZE] = password
-                .as_bytes()
-                .try_into()
-                .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "password must be 32 bytes long"))?;
-
-            return Ok(Password::<Default> {
-                pass: Zeroizing::new(bytes),
-                salt: None,
-                _data: PhantomData,
-            });
-        }
+        Self::ask_password_with_salt(Some(salt), false)
     }
     fn ask_password() -> io::Result<Self> {
+        Self::ask_password_with_salt(None, true)
+    }
+    fn ask_password_with_salt(salt: Option<[u8; 16]>, new_password: bool) -> io::Result<Self> {
         loop {
-            println!("what password do you wish to use, remember it");
-            let mut password = Zeroizing::new(String::new());
+            if new_password {
+                println!("what password do you wish to use, remember it");
+            }
             println!("password:");
 
-            io::stdin().read_line(&mut password)?;
-            if password.len() > PASS_SIZE {
-                println!("choose a smaller password");
-                continue;
-            }
-
-            let password = password.trim_matches(&['\r', '\n'][..]);
-            let bytes: [u8; PASS_SIZE] = password
-                .as_bytes()
-                .try_into()
-                .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "password must be 32 bytes long"))?;
+            let password = Zeroizing::new(rpassword::read_password()?);
+            let bytes = match pad_password(&password) {
+                Ok(bytes) => bytes,
+                Err(_) => {
+                    println!("choose a smaller password");
+                    continue;
+                },
+            };
 
             return Ok(Password::<Default> {
                 pass: Zeroizing::new(bytes),
-                salt: None,
+                salt,
                 _data: PhantomData,
             });
         }
@@ -88,9 +84,13 @@ impl Password<Default> {
         };
     }
     pub fn derive(self) -> io::Result<Password<Derived>> {
-        let mut salt = [0u8; 16];
-
-        OsRng.fill_bytes(&mut salt);
+        #[cfg(not(test))]
+        let should_save_salt = self.salt.is_none();
+        let salt = self.salt.unwrap_or_else(|| {
+            let mut salt = [0u8; 16];
+            OsRng.fill_bytes(&mut salt);
+            salt
+        });
 
         let mut key = [0u8; PASS_SIZE];
         Argon2::default()
@@ -104,7 +104,9 @@ impl Password<Default> {
         };
 
         #[cfg(not(test))]
-        ret.save_salt()?;
+        if should_save_salt {
+            ret.save_salt()?;
+        }
 
         Ok(ret)
     }
@@ -116,10 +118,43 @@ pub trait SaveSalt {
 
 impl SaveSalt for Password<Derived> {
     fn save_salt(&self) -> io::Result<()> {
-        let saltloc = std::env::home_dir().unwrap().join(SALT_PATH);
-        atomic_write(&self.salt.unwrap(), &saltloc)?;
+        let saltloc = home_dir().ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "home dir not found"))?.join(SALT_PATH);
+        let salt = self.salt.ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "missing salt"))?;
+        atomic_write(&salt, &saltloc)?;
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pads_short_password() {
+        let password = pad_password("secret").unwrap();
+
+        assert_eq!(&password[..6], b"secret");
+        assert_eq!(&password[6..], &[0u8; PASS_SIZE - 6]);
+    }
+
+    #[test]
+    fn rejects_empty_password() {
+        assert_eq!(pad_password("").unwrap_err().kind(), io::ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn derived_password_reuses_existing_salt() {
+        let salt = [3u8; 16];
+        let password = Password::<Default> {
+            pass: Zeroizing::new([7u8; PASS_SIZE]),
+            salt: Some(salt),
+            _data: PhantomData,
+        };
+
+        let password = password.derive().unwrap();
+
+        assert_eq!(password.salt, Some(salt));
     }
 }
 impl Password<Derived> {

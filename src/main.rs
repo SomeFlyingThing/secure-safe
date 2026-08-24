@@ -1,7 +1,6 @@
 use std::{
     env::home_dir,
     fs::File,
-    hint::assert_unchecked,
     io::{self, Read},
     os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
@@ -53,7 +52,9 @@ fn main() -> anyhow::Result<()> {
         },
 
         ParsedArgs::Delete(path) => {
-            if !path.starts_with(basep) {
+            let path = path.canonicalize()?;
+            let basep = basep.canonicalize()?;
+            if !path.starts_with(&basep) {
                 eprintln!("invalid path");
                 return Err(io::Error::new(io::ErrorKind::InvalidFilename, "invalid path").into());
             }

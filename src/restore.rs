@@ -15,6 +15,10 @@ pub fn restore(name: &str, pass: &Password<Derived>) -> io::Result<()> {
 }
 
 fn restore_at(name: &str, pass: &Password<Derived>, safe_path: &Path) -> io::Result<()> {
+    if Path::new(name).file_name().and_then(|name| name.to_str()) != Some(name) {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "invalid stored file name"));
+    }
+
     let file_path = safe_path.join(name);
 
     let (header, file_ptr_location) = Header::<Red>::load(&file_path)?;
@@ -34,8 +38,9 @@ fn normal_attomic_write(path: &Path, contents: &[u8]) -> io::Result<()> {
     file.sync_all()?;
 
     fs::rename(tmp, path)?;
-
-    file.sync_all()?;
+    if let Some(parent) = path.parent() {
+        fs::File::open(parent)?.sync_all()?;
+    }
 
     Ok(())
 }
@@ -79,5 +84,15 @@ mod simple_test{
         let restored = std::fs::read(&original).unwrap();
 
         assert_eq!(restored, file_contents);
+    }
+
+    #[test]
+    fn rejects_paths_outside_safe() {
+        let tmp = tempfile::tempdir().unwrap();
+        let password = Password::<Default>::test_create_pass([20u8; 32]).derive().unwrap();
+
+        let error = restore_at("../outside", &password, tmp.path()).unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
     }
 }

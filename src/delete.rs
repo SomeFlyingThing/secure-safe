@@ -1,5 +1,5 @@
 use std::{
-    fs::{self, File},
+    fs::{self, OpenOptions},
     io::{self, Write},
     os::unix::fs::MetadataExt,
     path::Path,
@@ -37,13 +37,14 @@ fn wipe(configs: &Configs, file_path: &Path) -> io::Result<()> {
         },
         times => {
             for _ in 0..times {
-                let mut file = File::open(file_path)?;
+                let mut file = OpenOptions::new().write(true).open(file_path)?;
 
                 let file_size = file.metadata()?.size();
 
                 let dead_data = vec![0u8; file_size as usize];
 
                 file.write_all(&dead_data)?;
+                file.sync_all()?;
             }
             fs::remove_file(file_path)?;
 
