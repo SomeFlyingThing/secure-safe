@@ -42,9 +42,7 @@ impl Password<Default> {
 
     fn ask_used_pass() -> io::Result<Self> {
         let saltloc = home_dir().ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "home dir not found"))?.join(SALT_PATH);
-        let salt: [u8; 16] = fs::read(saltloc)?
-            .try_into()
-            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid salt"))?;
+        let salt: [u8; 16] = fs::read(saltloc)?.try_into().map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid salt"))?;
 
         Self::ask_password_with_salt(Some(salt), false)
     }
@@ -157,6 +155,7 @@ mod tests {
         assert_eq!(password.salt, Some(salt));
     }
 }
+
 impl Password<Derived> {
     pub fn extract(&self) -> &[u8] {
         self.pass.deref()

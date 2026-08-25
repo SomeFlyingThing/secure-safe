@@ -3,28 +3,26 @@ use std::{
     path::Path,
 };
 
-
 use crate::{
-    Password,
     encryption::{
         contents::Safe,
-        password::Derived,
+        password::{Derived, Password},
     },
     file_format::header::{Header, Save, atomic_write},
     generate_path,
 };
 
-pub fn add(password: &Password<Derived>, path: &Path, file_contents: &Vec<u8>) -> io::Result<()> {
+pub fn add(password: &Password<Derived>, path: &Path, file_contents: &[u8]) -> io::Result<()> {
     let safe_path = generate_path().ok_or_else(|| io::Error::new(ErrorKind::NotFound, "home dir not found"))?;
     add_at(password, path, file_contents, &safe_path)
 }
 
-pub(crate) fn add_at(password: &Password<Derived>, path: &Path, file_contents: &Vec<u8>, safe_path: &Path) -> io::Result<()> {
+pub(crate) fn add_at(password: &Password<Derived>, path: &Path, file_contents: &[u8], safe_path: &Path) -> io::Result<()> {
     let header = Header::default();
 
     let mut header = header.configure(path);
 
-    let safe = Safe::new(password, file_contents.clone());
+    let safe = Safe::new(password, file_contents.to_vec());
     let safe = safe.encrypt()?;
 
     let mut encrypted_contents = Vec::new();

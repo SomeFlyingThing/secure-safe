@@ -14,7 +14,21 @@ pub fn restore(name: &str, pass: &Password<Derived>) -> io::Result<()> {
     restore_at(name, pass, &safe_path)
 }
 
+pub fn restore_in_mem(name: &str, pass: &Password<Derived>) -> io::Result<Vec<u8>> {
+    let safe_path = generate_path().ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "home dir not found"))?;
+    load_at(name, pass, &safe_path).map(|(_, contents)| contents)
+}
+
 fn restore_at(name: &str, pass: &Password<Derived>, safe_path: &Path) -> io::Result<()> {
+    let (header, contents) = load_at(name, pass, safe_path)?;
+
+    normal_attomic_write(&header.path(), &contents)?;
+
+    println!("file was sucessfully restored");
+    Ok(())
+}
+
+fn load_at(name: &str, pass: &Password<Derived>, safe_path: &Path) -> io::Result<(Header<Red>, Vec<u8>)> {
     if Path::new(name).file_name().and_then(|name| name.to_str()) != Some(name) {
         return Err(io::Error::new(io::ErrorKind::InvalidInput, "invalid stored file name"));
     }
@@ -25,10 +39,7 @@ fn restore_at(name: &str, pass: &Password<Derived>, safe_path: &Path) -> io::Res
 
     let contents = Safe::load(pass, &file_path, file_ptr_location)?;
 
-    normal_attomic_write(&header.path(), &contents)?;
-
-    println!("file was sucessfully restored");
-    Ok(())
+    Ok((header, contents))
 }
 fn normal_attomic_write(path: &Path, contents: &[u8]) -> io::Result<()> {
     let tmp = path.with_extension("tmp");
@@ -45,9 +56,8 @@ fn normal_attomic_write(path: &Path, contents: &[u8]) -> io::Result<()> {
     Ok(())
 }
 
-
 #[cfg(test)]
-mod simple_test{
+mod simple_test {
     use tempfile;
 
     use super::*;
@@ -66,10 +76,7 @@ mod simple_test{
 
         std::fs::write(&original, &file_contents).unwrap();
 
-        let password =
-            Password::<Default>::test_create_pass([20u8; 32])
-                .derive()
-                .unwrap();
+        let password = Password::<Default>::test_create_pass([20u8; 32]).derive().unwrap();
 
         // Configure your app so its storage directory == `safe_dir`.
         //

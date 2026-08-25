@@ -6,13 +6,12 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use encryption::password::Password;
 use secure_safe::file_format;
 
 use crate::{
     add::add,
     delete::confirm_intents,
-    login::has_login,
+    login::authenticate,
     parsing::{ParsedArgs, parse},
     settings::configs::Configs,
 };
@@ -37,12 +36,7 @@ fn main() -> anyhow::Result<()> {
 
     let basep = generate_path().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "couldnt get homedir"))?;
 
-    let password = match has_login() {
-        true => Password::recover()?,
-        false => Password::new()?,
-    };
-
-    let password = password.derive()?;
+    let password = authenticate()?;
 
     //load configs
     let configs = Configs::load()?;
