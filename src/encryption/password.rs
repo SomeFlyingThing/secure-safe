@@ -49,6 +49,7 @@ impl Password<Default> {
     fn ask_password() -> io::Result<Self> {
         Self::ask_password_with_salt(None, true)
     }
+
     fn ask_password_with_salt(salt: Option<[u8; 16]>, new_password: bool) -> io::Result<Self> {
         loop {
             if new_password {
@@ -124,9 +125,20 @@ impl SaveSalt for Password<Derived> {
     }
 }
 
+impl Password<Derived> {
+    pub fn extract(&self) -> &[u8] {
+        self.pass.deref()
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use std::{fs::OpenOptions, io::Write};
+
+use toml::ser::Error;
+
     use super::*;
+    use crate::{add::add, restore::restore};
 
     #[test]
     fn pads_short_password() {
@@ -154,10 +166,38 @@ mod tests {
 
         assert_eq!(password.salt, Some(salt));
     }
-}
 
-impl Password<Derived> {
-    pub fn extract(&self) -> &[u8] {
-        self.pass.deref()
+    #[test]
+    fn wrong_password() {
+        const CONTENTS: &[u8] = b"bandjfkjfkadjf";
+        const PATH: &[u8] = b"potato";
+
+        let salt = [4; 16];
+        let derive_password = |password| {
+            Password::<Default> {
+                pass: Zeroizing::new(pad_password(password).unwrap()),
+                salt: Some(salt),
+                _data: PhantomData,
+            }
+            .derive()
+            .unwrap()
+        };
+
+        let password = derive_password("BANANAN!");
+        let safe = crate::encryption::contents::Safe::new(&password, CONTENTS.to_vec());
+        let encrypted = safe.encrypt(PATH).unwrap();
+
+        let mut encrypted_contents = Vec::new();
+        encrypted.save(&mut encrypted_contents).unwrap();
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let encrypted_file = temp_dir.path().join("potato");
+        std::fs::write(&encrypted_file, encrypted_contents).unwrap();
+
+        let wrong_password = derive_password("boooo");
+
+        let result = crate::encryption::contents::Safe::load(&wrong_password, &encrypted_file, 0, PATH);
+
+        assert!(result.is_err());
     }
 }
