@@ -1,132 +1,149 @@
 <div align="center">
   <h1>🔐 secure_safe</h1>
-  <p><strong>A local encrypted-file vault written in Rust.</strong></p>
+  <p><strong>A fully local encrypted-file vault written in Rust.</strong></p>
   <p>
     <img alt="Rust 2024" src="https://img.shields.io/badge/Rust-2024-DEA584?logo=rust&amp;logoColor=white">
-    <img alt="XChaCha20-Poly1305" src="https://img.shields.io/badge/encryption-XChaCha20--Poly1305-6E56CF">
+    <img alt="ChaCha20-Poly1305" src="https://img.shields.io/badge/encryption-ChaCha20--Poly1305-6E56CF">
     <img alt="Argon2" src="https://img.shields.io/badge/key%20derivation-Argon2-1F8AC0">
   </p>
 </div>
 
-`secure_safe` compresses a file, encrypts it into a vault on the local filesystem, and then attempts to remove the plaintext source. It can later authenticate, decrypt, decompress, and restore the file to the path recorded when it was added.
+`secure_safe` stores files in a local encrypted vault. Files are encrypted with ChaCha20-Poly1305 using a key derived from the login password with Argon2. The original path is stored in the entry header and authenticated as AEAD associated data, so changing it causes decryption to fail.
 
 ## How it works
 
-When a file is added, `secure_safe`:
+On first use, `secure_safe` asks for a password, generates a random 16-byte salt, derives a 32-byte key with Argon2, stores the salt in `~/salt.sf`, and creates an encrypted `pass-check` entry used to verify future logins.
 
-1. Reads the entire file into memory and compresses it with Zstandard level 5.
-2. Generates a random 16-byte salt and derives a 32-byte key from the password using the default Argon2 parameters.
-3. Generates a random 24-byte nonce and encrypts the compressed bytes with XChaCha20-Poly1305.
-4. Authenticates the original path as associated data.
-5. Writes a mode-`0600` temporary vault entry and syncs its contents to stable storage.
-6. Atomically publishes the entry under the source file's basename without replacing an existing entry, then syncs the vault directory.
-7. Attempts to delete the original file only after the encrypted entry is durable.
+When a file is added:
 
-Passwords and derived keys are held in zeroizing wrappers. Each file has its own salt and may use a different password; there is no global vault password or password database.
+1. The file is read into memory.
+2. Its original path is placed in the entry header.
+3. A random 12-byte nonce is generated.
+4. The file contents are encrypted with ChaCha20-Poly1305.
+5. The path bytes are supplied as additional authenticated data (AAD), so the path remains readable but cannot be changed without invalidating authentication.
+6. A BLAKE3 hash of the encrypted payload is stored in the header as an additional corruption check.
+7. The vault entry is written through a temporary mode-`0600` file, synced, renamed into place, and the vault directory is synced.
+8. After the vault entry has been written successfully, the original plaintext file is removed.
 
-The vault filename and recorded original path are **not encrypted**. Only the compressed file contents are encrypted; the path is plaintext but authenticated.
+Passwords and derived keys are held in zeroizing wrappers.
 
-## Requirements and build
+## Build
 
-- A Unix-like operating system. The current implementation uses Unix-specific filesystem APIs.
-- A Rust toolchain with Rust 2024 edition support.
-- A C toolchain required by the `zstd` dependency.
-
-Build the release binary:
+The current implementation targets Unix-like systems and uses Unix-specific filesystem APIs.
 
 ```console
 cargo build --release
-./target/release/secure_safe help
 ```
 
-Run the test suite during development:
+Run it with:
+
+```console
+./target/release/secure_safe <COMMAND> <ARGUMENT>
+```
+
+Run the tests with:
 
 ```console
 cargo test
 ```
 
-## Usage
+or, with cargo-nextest installed:
 
-```text
-secure_safe <COMMAND> [PATH]
+```console
+cargo nextest run
 ```
+
+## Commands
+
+The CLI currently accepts these commands exactly:
 
 | Command | Behavior |
 | --- | --- |
-| `add [PATH]` | Compresses and encrypts a file, stores it in the vault, then attempts to remove the source. Opens the source-file explorer when `PATH` is omitted. |
-| `mo [NAME]` | Restores a vault entry to its recorded path, then overwrites and removes the vault entry. Opens the vault explorer when `NAME` is omitted. |
-| `rm [NAME]` | After confirmation, overwrites the selected vault entry with zero bytes and removes it. Opens the vault explorer when `NAME` is omitted. |
-| `check` | Tries to authenticate every regular file in the vault with the entered password. Successful filenames are printed; invalid or unauthenticated entries are reported to stderr. |
-| `help` | Prints command help. |
+| `add <PATH>` | Encrypts the file, stores it in `~/secure-safe` under its basename, then removes the original file. |
+| `restore <NAME>` | Loads the named vault entry, verifies and decrypts it, and writes the plaintext back to the original path recorded in its header. The encrypted vault entry is kept. |
+| `delete <PATH>` | Deletes a vault file after confirmation. The supplied path must resolve inside `~/secure-safe`. Depending on configuration, the file may be overwritten with zeroes before unlinking. |
+| `about` | Prints a short description of the project. |
 
-The long forms `--add`, `--mo`, `--rm`, `--check`, and `--help` are also accepted. `-h` and `--h` are accepted as help aliases.
-
-Every operation that asks for a password also asks for confirmation. A wrong password during `mo` prompts again; press `Ctrl+C` to stop retrying.
+All commands go through password authentication before executing.
 
 ### Examples
 
 ```console
-# Encrypt a file and attempt to remove the plaintext source.
-# An absolute path makes the later restore location unambiguous.
+# Add a file to the vault
 secure_safe add /home/alice/Documents/secret.txt
 
-# Restore the entry to /home/alice/Documents/secret.txt
-secure_safe mo secret.txt
+# Restore ~/secure-safe/secret.txt to the path recorded when it was added
+secure_safe restore secret.txt
 
-# Authenticate entries that use this password
-secure_safe check
+# Delete a vault entry
+secure_safe delete ~/secure-safe/secret.txt
 
-# Permanently remove an entry without restoring it
-secure_safe rm secret.txt
+# Print the project description
+secure_safe about
 ```
 
-`NAME` must be a bare vault filename, not a path. Because vault entries use only the source basename, `report.txt` is the entry name regardless of the source directory.
+For `restore`, `NAME` must be a bare filename such as `secret.txt`; paths such as `../secret.txt` are rejected.
 
-## Interactive file explorer
+## Storage
 
-Run `add`, `mo`, or `rm` without the optional argument to choose a file interactively.
-
-- `add` starts in the home directory and permits directory navigation.
-- `mo` and `rm` show regular files directly inside the configured vault; directories are hidden and cannot be opened.
-
-| Key | Action |
-| --- | --- |
-| `↑` / `↓` | Move the selection. |
-| `→` | Open the selected directory in the `add` explorer. |
-| `←` | Go to the parent directory in the `add` explorer. |
-| `Enter` | Choose the selected file. |
-| `q` / `Esc` | Quit. |
-
-The explorer requires an interactive terminal.
-
-## Configuration and storage
-
-On the first non-help command, `secure_safe` creates:
-
-| Path | Purpose |
-| --- | --- |
-| `~/.safe_dir/` | Default vault directory containing encrypted entries. |
-| `~/secure_safe.settings` | TOML settings file containing the `enc_dir` path. |
-
-To use another vault directory, edit `~/secure_safe.settings`:
-
-```toml
-enc_dir = "/absolute/path/to/my-vault"
-```
-
-The directory is created automatically when the settings are loaded.
-
-### Entry format
-
-Each vault entry currently contains, in order:
+The vault directory is:
 
 ```text
-16-byte salt
-24-byte nonce
-4-byte little-endian original-path length
-original path bytes (plaintext, authenticated)
-XChaCha20-Poly1305 ciphertext and authentication tag
+~/secure-safe/
 ```
+
+The password-derivation salt is stored at:
+
+```text
+~/salt.sf
+```
+
+The optional configuration file is:
+
+```text
+~/secure-safe.toml
+```
+
+It currently supports:
+
+```toml
+overwrite_times = 0
+```
+
+`overwrite_times` controls how many zero-overwrite passes `delete` performs before unlinking the file. The default is `0`.
+
+## Entry format
+
+Each encrypted vault entry is stored in this order:
+
+```text
+11 bytes   marker: "secure_safe"
+8 bytes    original-path length, big-endian u64
+N bytes    original path, plaintext and authenticated as AAD
+32 bytes   BLAKE3 hash of the encrypted payload
+12 bytes   ChaCha20-Poly1305 nonce
+M bytes    ciphertext + 16-byte Poly1305 authentication tag
+```
+
+The BLAKE3 hash covers the encrypted payload beginning with the nonce. ChaCha20-Poly1305 provides the keyed authentication: both the ciphertext and the path supplied as AAD must match for decryption to succeed.
+
+## Restore behavior
+
+`restore <NAME>` reads the path from the encrypted entry's header, authenticates that exact path through ChaCha20-Poly1305 AAD, decrypts the contents, and writes them through a temporary file before renaming it to the recorded destination.
+
+Because the entry name is based on the original file's basename, a file added as:
+
+```text
+/home/alice/Documents/report.txt
+```
+
+is stored as:
+
+```text
+~/secure-safe/report.txt
+```
+
+while its full original path remains recorded in the entry header for restoration.
 
 ## License
 
