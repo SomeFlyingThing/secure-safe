@@ -1,16 +1,12 @@
 <div align="center">
   <h1>🔐 secure_safe</h1>
-  <p><strong>An experimental, local encrypted-file vault written in Rust.</strong></p>
+  <p><strong>A local encrypted-file vault written in Rust.</strong></p>
   <p>
     <img alt="Rust 2024" src="https://img.shields.io/badge/Rust-2024-DEA584?logo=rust&amp;logoColor=white">
     <img alt="XChaCha20-Poly1305" src="https://img.shields.io/badge/encryption-XChaCha20--Poly1305-6E56CF">
     <img alt="Argon2" src="https://img.shields.io/badge/key%20derivation-Argon2-1F8AC0">
-    <img alt="Status: experimental" src="https://img.shields.io/badge/status-experimental-D73A49">
   </p>
 </div>
-
-> [!CAUTION]
-> Do not use this version as the only copy of important files. The project is unaudited and pre-alpha. Although add and restore now durably commit their output before removing the prior copy, the complete vault workflow is not transactional and has not been audited for every filesystem and failure mode.
 
 `secure_safe` compresses a file, encrypts it into a vault on the local filesystem, and then attempts to remove the plaintext source. It can later authenticate, decrypt, decompress, and restore the file to the path recorded when it was added.
 
@@ -28,7 +24,7 @@ When a file is added, `secure_safe`:
 
 Passwords and derived keys are held in zeroizing wrappers. Each file has its own salt and may use a different password; there is no global vault password or password database.
 
-These are implementation details, not a security guarantee. The vault filename and recorded original path are **not encrypted**. Only the compressed file contents are encrypted; the path is plaintext but authenticated.
+The vault filename and recorded original path are **not encrypted**. Only the compressed file contents are encrypted; the path is plaintext but authenticated.
 
 ## Requirements and build
 
@@ -132,31 +128,6 @@ original path bytes (plaintext, authenticated)
 XChaCha20-Poly1305 ciphertext and authentication tag
 ```
 
-The format has no magic bytes or version field and may change without migration support.
-
-## Important limitations
-
-- **No password recovery:** forgetting a file's password makes that file unrecoverable.
-- **Not a backup:** a successful `add` is designed to delete the source. Keep independent backups of important data.
-- **Non-transactional workflow:** add and restore sync their new file and parent directory before removing the prior copy, but each full operation still spans multiple filesystem actions. An interruption can leave redundant source, temporary, or vault files that require manual cleanup.
-- **Whole-file memory use:** adding, restoring, and authenticating an entry load its encrypted or plaintext contents into memory. This is unsuitable for very large files.
-- **Metadata exposure:** vault filenames reveal source basenames, and each entry stores its original path in plaintext.
-- **Basename collisions:** two source files with the same basename map to the same vault entry. The second `add` fails while the first entry exists.
-- **Relative paths:** the exact path supplied to `add` is recorded. If it is relative, restoration resolves it from the process's current working directory, which may not be the original directory.
-- **Restore conflicts:** restoration can replace an existing file at the recorded path on Unix. It also fails if the sibling temporary path (with extension `secure_safe.tmp`) already exists or if the parent directory is missing.
-- **Limited checking:** `check` authenticates ciphertext but does not decompress it, validate its eventual restore destination, or produce a failing process status merely because an individual entry fails authentication.
-- **Best-effort erasure:** overwriting before unlinking does not guarantee physical erasure on SSDs, copy-on-write filesystems, journaled filesystems, snapshots, backups, or remote storage.
-- **Terminal behavior:** password prompts and the file explorer expect an interactive terminal. Passwords must currently be entered twice even for restore and check operations.
-- **Unaudited cryptography:** the design and implementation have not received an independent security review.
-
-## Development priorities
-
-Before this project should be considered for production use, it needs transactional and durable file operations, explicit restore-conflict handling, a versioned format, streaming I/O, clearer command outcomes and exit statuses, broader interruption and failure-path tests, and an independent security review.
-
 ## License
 
 Licensed under the [Apache License 2.0](LICENSE).
-
-<div align="center">
-  <sub>Experimental cryptography code: inspect first, trust later.</sub>
-</div>
