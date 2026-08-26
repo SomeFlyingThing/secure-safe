@@ -6,7 +6,10 @@ use std::{
     path::Path,
 };
 
-use chacha20poly1305::{ChaCha20Poly1305, KeyInit, Nonce, aead::Aead};
+use chacha20poly1305::{
+    ChaCha20Poly1305, KeyInit, Nonce,
+    aead::{Aead, Payload},
+};
 use rand_core::{OsRng, RngCore};
 
 use crate::{
@@ -29,7 +32,7 @@ pub struct Safe<'a, State> {
 }
 
 impl<'a> Safe<'a, Red> {
-    pub fn load(pass: &Password<Derived>, contents_path: &Path, file_ptr_location: usize) -> io::Result<Vec<u8>> {
+    pub fn load(pass: &Password<Derived>, contents_path: &Path, file_ptr_location: usize, path: &[u8]) -> io::Result<Vec<u8>> {
         let mut file = File::open(contents_path)?;
 
         let mut contents = Vec::new();
@@ -40,11 +43,8 @@ impl<'a> Safe<'a, Red> {
 
         file.read_to_end(&mut contents)?;
 
-        let   decrypted = decrypt(pass, &nonce, &contents)?;
+        let decrypted = decrypt(pass, &nonce, &contents, path)?;
 
-        
-        
-    
         Ok(decrypted)
     }
 }
@@ -66,18 +66,17 @@ impl<'a> Safe<'a, Raw> {
             _data: PhantomData,
         }
     }
-    pub fn encrypt(&self) -> io::Result<Safe<'_, Encrypted>> {
+    pub fn encrypt(&self, path: &[u8]) -> io::Result<Safe<'_, Encrypted>> {
         let cipher = ChaCha20Poly1305::new_from_slice(self.password.extract()).map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "password to big"))?;
 
         let mut nounce = [0u8; NOUNCE_SIZE];
         OsRng.fill_bytes(&mut nounce);
 
         let nonce = Nonce::from(nounce);
+        let plaintext = self.contents.as_deref().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid data"))?;
+
         let ciphertext = cipher
-            .encrypt(
-                &nonce,
-                self.contents.as_deref().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid data"))?,
-            )
+            .encrypt(&nonce, Payload { msg: plaintext, aad: path })
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid data"))?;
 
         Ok(Safe::<Encrypted> {
@@ -110,11 +109,13 @@ impl<'a> Safe<'a, Encrypted> {
     }
 }
 
-fn decrypt(pass: &Password<Derived>, nonce: &[u8; 12], contents: &[u8]) -> io::Result<Vec<u8>> {
+fn decrypt(pass: &Password<Derived>, nonce: &[u8; 12], contents: &[u8], path: &[u8]) -> io::Result<Vec<u8>> {
     //decryption
 
     let cipher = ChaCha20Poly1305::new_from_slice(pass.extract()).map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "decryption failed"))?;
 
     let nonce = Nonce::from(*nonce);
-    cipher.decrypt(&nonce, contents).map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "decryption failed"))
+    cipher
+        .decrypt(&nonce, Payload { msg: contents, aad: path })
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "decryption failed"))
 }

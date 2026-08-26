@@ -37,7 +37,9 @@ fn load_at(name: &str, pass: &Password<Derived>, safe_path: &Path) -> io::Result
 
     let (header, file_ptr_location) = Header::<Red>::load(&file_path)?;
 
-    let contents = Safe::load(pass, &file_path, file_ptr_location)?;
+    let path = header.path();
+    let path = path.as_os_str().as_encoded_bytes();
+    let contents = Safe::load(pass, &file_path, file_ptr_location, &path)?;
 
     Ok((header, contents))
 }

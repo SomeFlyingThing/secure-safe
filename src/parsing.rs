@@ -1,5 +1,4 @@
 use std::path::PathBuf;
-use crate::assert_unchecked;
 
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
 pub enum ParsingError {
@@ -27,10 +26,7 @@ where
     #[inline]
     fn get_args(&self, pos: usize) -> Result<T, ParsingError> {
 
-        //CHECK: to always be with the len prechecked
-        unsafe {
-            assert_unchecked(pos > 0);
-        }
+        
 
         //if empty
         let Some(item) = self.get(pos) else {

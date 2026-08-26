@@ -23,7 +23,8 @@ pub(crate) fn add_at(password: &Password<Derived>, path: &Path, file_contents: &
     let mut header = header.configure(path);
 
     let safe = Safe::new(password, file_contents.to_vec());
-    let safe = safe.encrypt()?;
+    let path_b = path.as_os_str().as_encoded_bytes();
+    let safe = safe.encrypt(path_b)?;
 
     let mut encrypted_contents = Vec::new();
     safe.save(&mut encrypted_contents)?;
