@@ -9,7 +9,7 @@ use std::{
 use secure_safe::file_format;
 
 use crate::{
-    add::{add, exists},
+    add::{add, check_existence_n_handle},
     delete::{confirm_intents, resolve_stored_file},
     login::authenticate,
     parsing::{ParsedArgs, parse},
@@ -50,9 +50,8 @@ fn main() -> anyhow::Result<()> {
             confirm_intents(&configs, &item)?;
         },
         ParsedArgs::Add(path) => {
-            if exists(&path.file_name().unwrap().to_string_lossy()) {
-                eprintln!("a file with that name already exists");
-            }
+            check_existence_n_handle(&path.file_name().unwrap().to_string_lossy())?;
+
             let file_contents = read_file(&path)?;
             add(&password, &path, &file_contents)?;
         },
@@ -70,4 +69,24 @@ fn read_file(path: &Path) -> io::Result<Vec<u8>> {
     file.read_to_end(&mut vec)?;
 
     Ok(vec)
+}
+
+#[cfg(test)]
+mod test {
+    use std::fs::OpenOptions;
+
+    use tempfile::{TempDir, tempdir};
+
+    use super::*;
+
+    fn create_space() {}
+    #[test]
+    fn existing_name() {
+        let dir = tempdir().unwrap();
+        let dir = dir.path();
+        let filname = "potato";
+
+        let path = dir.join(filname);
+        let file = OpenOptions::new().create(true).write(true).open(path).unwrap();
+    }
 }
