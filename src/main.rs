@@ -9,11 +9,7 @@ use std::{
 use secure_safe::file_format;
 
 use crate::{
-    add::add,
-    delete::confirm_intents,
-    login::authenticate,
-    parsing::{ParsedArgs, parse},
-    settings::configs::Configs,
+    add::{add, exists}, delete::confirm_intents, login::authenticate, parsing::{ParsedArgs, parse}, settings::configs::Configs,
 };
 
 mod about;
@@ -55,6 +51,9 @@ fn main() -> anyhow::Result<()> {
             confirm_intents(&configs, &path)?;
         },
         ParsedArgs::Add(path) => {
+            if exists(&path.file_name().unwrap().to_string_lossy()){
+                eprintln!("a file with that name already exists");
+            }
             let file_contents = read_file(&path)?;
             add(&password, &path, &file_contents)?;
         },

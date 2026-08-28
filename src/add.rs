@@ -51,3 +51,12 @@ pub(crate) fn add_at(password: &Password<Derived>, path: &Path, file_contents: &
 
     Ok(())
 }
+
+pub fn exists(name: &str) -> bool {
+    let path = generate_path().unwrap();
+
+    if path.join(name).is_file() {
+        return true;
+    }
+    false
+}
