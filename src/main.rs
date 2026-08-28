@@ -73,20 +73,29 @@ fn read_file(path: &Path) -> io::Result<Vec<u8>> {
 
 #[cfg(test)]
 mod test {
-    use std::fs::OpenOptions;
+    use std::fs::{OpenOptions, create_dir_all, exists};
 
     use tempfile::{TempDir, tempdir};
 
     use super::*;
 
-    fn create_space() {}
+    fn create_space() {
+        let path =generate_path().unwrap();
+
+        create_dir_all(path);
+    }
     #[test]
     fn existing_name() {
         let dir = tempdir().unwrap();
         let dir = dir.path();
+        
         let filname = "potato";
 
+        create_space();
         let path = dir.join(filname);
-        let file = OpenOptions::new().create(true).write(true).open(path).unwrap();
+        let file = OpenOptions::new().create(true).write(true).open(&path).unwrap();
+
+        let res = check_existence_n_handle(&path.to_string_lossy());
+        assert!(res.is_err())
     }
 }
