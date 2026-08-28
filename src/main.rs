@@ -9,7 +9,11 @@ use std::{
 use secure_safe::file_format;
 
 use crate::{
-    add::{add, exists}, delete::confirm_intents, login::authenticate, parsing::{ParsedArgs, parse}, settings::configs::Configs,
+    add::{add, exists},
+    delete::{confirm_intents, resolve_stored_file},
+    login::authenticate,
+    parsing::{ParsedArgs, parse},
+    settings::configs::Configs,
 };
 
 mod about;
@@ -41,17 +45,12 @@ fn main() -> anyhow::Result<()> {
             restore::restore(&name, &password)?;
         },
 
-        ParsedArgs::Delete(path) => {
-            let path = path.canonicalize()?;
-            let basep = basep.canonicalize()?;
-            if !path.starts_with(&basep) {
-                eprintln!("invalid path");
-                return Err(io::Error::new(io::ErrorKind::InvalidFilename, "invalid path").into());
-            }
-            confirm_intents(&configs, &path)?;
+        ParsedArgs::Delete(name) => {
+            let item = resolve_stored_file(&basep, &name)?;
+            confirm_intents(&configs, &item)?;
         },
         ParsedArgs::Add(path) => {
-            if exists(&path.file_name().unwrap().to_string_lossy()){
+            if exists(&path.file_name().unwrap().to_string_lossy()) {
                 eprintln!("a file with that name already exists");
             }
             let file_contents = read_file(&path)?;

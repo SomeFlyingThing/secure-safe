@@ -2,13 +2,14 @@ use std::path::PathBuf;
 
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
 pub enum ParsingError {
+    UnknownArgs,
     MissingArg(usize),
     NoArgs,
 }
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
 pub enum ParsedArgs {
     Restore(String),
-    Delete(PathBuf),
+    Delete(String),
     Add(PathBuf),
     About,
 }
@@ -16,8 +17,7 @@ pub enum ParsedArgs {
 ///this trait is made to be used on vectors it auto handles emptiness
 trait EmptyArgs<T> {
     fn get_args(&self, pos: usize) -> Result<T, ParsingError>;
-} 
-
+}
 
 impl<T> EmptyArgs<T> for Vec<T>
 where
@@ -25,9 +25,6 @@ where
 {
     #[inline]
     fn get_args(&self, pos: usize) -> Result<T, ParsingError> {
-
-        
-
         //if empty
         let Some(item) = self.get(pos) else {
             eprintln!("missing arg in position {pos}");
@@ -48,9 +45,12 @@ pub fn parse() -> Result<ParsedArgs, ParsingError> {
 
     match args.as_str() {
         "add" => Ok(ParsedArgs::Add(PathBuf::from(full_args.get_args(2)?))),
-        "delete" => Ok(ParsedArgs::Delete(PathBuf::from(full_args.get_args(2)?))),
+        "delete" => Ok(ParsedArgs::Delete(full_args.get_args(2)?)),
         "restore" => Ok(ParsedArgs::Restore(full_args.get_args(2)?)),
         "about" => Ok(ParsedArgs::About),
-        _ => unreachable!(),
+        _ => {
+            eprintln!("unknown command");
+            Err(ParsingError::UnknownArgs)
+        },
     }
 }

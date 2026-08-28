@@ -44,11 +44,11 @@ impl Load for Configs {
         Ok(config)
     }
 }
-impl Configs{
-    pub fn load()->io::Result<Configs>{
+impl Configs {
+    pub fn load() -> io::Result<Configs> {
         <Configs as Load>::load(&())
     }
-    pub const fn overwrite_times(&self)->u8{
+    pub const fn overwrite_times(&self) -> u8 {
         self.overwrite_times
     }
 }

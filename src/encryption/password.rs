@@ -135,7 +135,7 @@ impl Password<Derived> {
 mod tests {
     use std::{fs::OpenOptions, io::Write};
 
-use toml::ser::Error;
+    use toml::ser::Error;
 
     use super::*;
     use crate::{add::add, restore::restore};

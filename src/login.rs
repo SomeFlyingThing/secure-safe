@@ -39,9 +39,7 @@ fn password_is_correct(password: &Password<Derived>) -> io::Result<bool> {
 }
 
 fn create_pass_verifier(password: &Password<Derived>) -> io::Result<()> {
-    let path = generate_path()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "home dir not found"))?
-        .join(PASS_CHECK_NAME);
+    let path = generate_path().ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "home dir not found"))?.join(PASS_CHECK_NAME);
 
     add(password, &path, PASS_CHECK_CONTENTS)
 }
