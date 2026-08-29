@@ -105,7 +105,7 @@ impl Header<Configured> {
 }
 pub fn atomic_write(contents: &[u8], path: &Path) -> io::Result<()> {
     let extension :u64 = rng().random();
-    let extension = format!(".tmp{extension}");
+    let extension = format!("tmp{extension}");
     let tmp = path.with_extension(extension);
 
     
