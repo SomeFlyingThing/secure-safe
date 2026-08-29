@@ -30,6 +30,7 @@ zstd = "0.13.3"
 blake3 = "1.5"
 tempfile = "3.27.0"
 afl = { version = "0.18", optional = true }
+rand = "0.10.2"
 
 [profile.release]
 opt-level = 3

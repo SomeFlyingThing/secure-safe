@@ -5,7 +5,7 @@ use std::{
     os::unix::fs::OpenOptionsExt,
     path::{Path, PathBuf},
 };
-
+use rand::{Rng, RngExt, rng};
 const MARKER: [u8; 11] = *b"secure_safe";
 
 pub trait Save {
@@ -104,8 +104,12 @@ impl Header<Configured> {
     }
 }
 pub fn atomic_write(contents: &[u8], path: &Path) -> io::Result<()> {
-    let tmp = path.with_extension("tmp");
-    let mut file = OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&tmp)?;
+    let extension :u64 = rng().random();
+    let extension = format!(".tmp{extension}");
+    let tmp = path.with_extension(extension);
+
+    
+    let mut file = OpenOptions::new().write(true).create_new(true).truncate(true).mode(0o600).open(&tmp)?;
 
     file.write_all(contents)?;
     file.sync_all()?;
