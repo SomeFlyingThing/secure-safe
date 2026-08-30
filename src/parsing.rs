@@ -9,6 +9,7 @@ pub enum ParsingError {
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
 pub enum ParsedArgs {
     Restore(String),
+    WatchDir(PathBuf),
     Delete(String),
     Add(PathBuf),
     About,
@@ -48,6 +49,7 @@ pub fn parse() -> Result<ParsedArgs, ParsingError> {
         "delete" => Ok(ParsedArgs::Delete(full_args.get_args(2)?)),
         "restore" => Ok(ParsedArgs::Restore(full_args.get_args(2)?)),
         "about" => Ok(ParsedArgs::About),
+        "watchd" => Ok(ParsedArgs::WatchDir(PathBuf::from(full_args.get_args(2)?))),
         _ => {
             eprintln!("unknown command");
             Err(ParsingError::UnknownArgs)

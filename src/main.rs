@@ -11,6 +11,7 @@ use secure_safe::file_format;
 use crate::{
     add::{add, check_existence_n_handle},
     delete::{confirm_intents, resolve_stored_file},
+    dir_watch::watch_dir,
     login::authenticate,
     parsing::{ParsedArgs, parse},
     settings::configs::Configs,
@@ -19,6 +20,7 @@ use crate::{
 mod about;
 mod add;
 mod delete;
+mod dir_watch;
 mod encryption;
 mod login;
 mod parsing;
@@ -56,6 +58,10 @@ fn main() -> anyhow::Result<()> {
             add(&password, &path, &file_contents)?;
         },
         ParsedArgs::About => about::about(),
+
+        ParsedArgs::WatchDir(path) => {
+            watch_dir(&path, &password)?;
+        },
     }
     Ok(())
 }
@@ -80,7 +86,7 @@ mod test {
     use super::*;
 
     fn create_space() {
-        let path =generate_path().unwrap();
+        let path = generate_path().unwrap();
 
         create_dir_all(path);
     }
@@ -88,7 +94,7 @@ mod test {
     fn existing_name() {
         let dir = tempdir().unwrap();
         let dir = dir.path();
-        
+
         let filname = "potato";
 
         create_space();

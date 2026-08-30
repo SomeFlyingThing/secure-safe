@@ -1,5 +1,4 @@
 use std::{
-    env::temp_dir,
     io::{self, ErrorKind},
     path::Path,
 };
