@@ -62,6 +62,7 @@ The CLI currently accepts these commands exactly:
 | `add <PATH>` | Encrypts the file, stores it in `~/secure-safe` under its basename, then removes the original file. |
 | `restore <NAME>` | Loads the named vault entry, verifies and decrypts it, and writes the plaintext back to the original path recorded in its header. The encrypted vault entry is kept. |
 | `delete <PATH>` | Deletes a vault file after confirmation. The supplied path must resolve inside `~/secure-safe`. Depending on configuration, the file may be overwritten with zeroes before unlinking. |
+| `watchd <DIRECTORY>` | Watches a directory and automatically encrypts a file after it is closed following a write, or when a file is moved into the directory. The encrypted entry is stored in `~/secure-safe`, then the plaintext source file is removed. |
 | `about` | Prints a short description of the project. |
 
 All commands go through password authentication before executing.
@@ -78,11 +79,18 @@ secure_safe restore secret.txt
 # Delete a vault entry
 secure_safe delete ~/secure-safe/secret.txt
 
+# Watch a directory and secure each completed file written or moved into it
+secure_safe watchd /home/alice/Documents/to-secure
+
 # Print the project description
 secure_safe about
 ```
 
 For `restore`, `NAME` must be a bare filename such as `secret.txt`; paths such as `../secret.txt` are rejected.
+
+### Watching a directory
+
+`watchd` runs until it is stopped. It watches only the specified directory, not its subdirectories. A file is secured when it is closed after writing or moved into the watched directory. Directories and other non-file events are ignored. As with `add`, the original plaintext file is deleted only after its encrypted vault entry has been written successfully.
 
 ## Storage
 
